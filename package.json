@@ -1,0 +1,60 @@
+{
+  "name": "invoice-system",
+  "private": true,
+  "version": "0.0.1",
+  "main": "dist-electron/main.js",
+  "type": "module",
+  "description": "I3PL Dispatch Invoice System - A comprehensive logistics dispatch and invoice management solution",
+  "author": "I3PL India Pvt Ltd",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "lint": "eslint .",
+    "preview": "vite preview",
+    "electron:build-main": "tsc -p tsconfig.electron.json && node -e \"const fs=require('fs'); if(!fs.existsSync('dist-electron')) fs.mkdirSync('dist-electron'); fs.writeFileSync('dist-electron/package.json', JSON.stringify({type: 'commonjs'}))\"",
+    "electron:watch-main": "tsc -w -p tsconfig.electron.json",
+    "electron:dev": "concurrently -k \"npm run dev\" \"tsc -w -p tsconfig.electron.json\" \"wait-on http://localhost:5173 && electronmon .\"",
+    "electron:build": "npm run build && npm run electron:build-main && electron-builder"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.1075.0",
+    "@tailwindcss/vite": "^4.3.1",
+    "better-sqlite3": "^12.11.1",
+    "electron-log": "^5.4.4",
+    "electron-updater": "^6.8.9",
+    "lucide-react": "^1.21.0",
+    "pdf-lib": "^1.17.1",
+    "pdf-to-printer": "^5.8.0",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "react-router-dom": "^7.18.0",
+    "tailwindcss": "^4.3.1"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^24.13.2",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.2",
+    "concurrently": "^10.0.3",
+    "cross-env": "^10.1.0",
+    "electron": "^42.5.0",
+    "electron-builder": "^26.15.3",
+    "electronmon": "^2.0.4",
+    "eslint": "^10.5.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "eslint-plugin-react-refresh": "^0.5.3",
+    "globals": "^17.6.0",
+    "typescript": "~6.0.2",
+    "typescript-eslint": "^8.61.0",
+    "vite": "^8.1.0",
+    "wait-on": "^9.0.10"
+  },
+  "electronmon": {
+    "patterns": [
+      "!database/**",
+      "!backups/**",
+      "!prints/**"
+    ]
+  }
+}

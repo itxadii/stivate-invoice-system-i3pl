@@ -1,0 +1,37 @@
+appId: com.i3pl.invoice-system
+productName: I3PL Dispatch Invoice System
+copyright: Copyright © 2024 I3PL India Pvt Ltd. All rights reserved.
+publish:
+  provider: github
+  owner: itxadii
+  repo: stivate-invoice-system-i3pl
+directories:
+  output: dist
+  buildResources: build
+files:
+  - dist/**/*
+  - dist-electron/**/*
+  - node_modules/**/*
+  - package.json
+extraMetadata:
+  main: dist-electron/main.js
+win:
+  target:
+    - nsis
+    - portable
+  artifactName: ${productName}-${version}-${arch}.${ext}
+  icon: build/icon.png
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: I3PL Invoice System
+portable:
+  artifactName: ${productName}-${version}-${arch}.exe
+asar: true
+asarUnpack:
+  - node_modules/better-sqlite3/**
+  - node_modules/pdf-to-printer/**
+  - node_modules/@tailwindcss/oxide-win32-x64-msvc/**
+  - node_modules/lightningcss-win32-x64-msvc/**
