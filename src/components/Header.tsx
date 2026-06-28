@@ -37,35 +37,35 @@ export const Header: React.FC<HeaderProps> = ({ title, companyName }) => {
   }, []);
 
   return (
-    <header className="bg-white border-b border-slate-200 h-16 px-6 flex items-center justify-between select-none">
-      <div className="flex items-center gap-4">
-        <h2 className="text-xl font-bold text-slate-800 leading-none">{title}</h2>
-        <div className="h-4 w-px bg-slate-200" />
-        <span className="text-sm font-semibold text-slate-500">{companyName}</span>
+    <header className="bg-white border-b border-slate-200 h-16 px-4 sm:px-6 flex items-center justify-between select-none">
+      <div className="flex items-center gap-2 sm:gap-4 min-w-0">
+        <h2 className="text-lg sm:text-xl font-bold text-slate-800 leading-none whitespace-nowrap truncate">{title}</h2>
+        <div className="h-4 w-px bg-slate-200 hidden sm:block flex-shrink-0" />
+        <span className="text-sm font-semibold text-slate-500 hidden md:inline whitespace-nowrap truncate">{companyName}</span>
       </div>
 
-      <div className="flex items-center gap-6">
+      <div className="flex items-center gap-2 sm:gap-4 flex-shrink-0">
         {/* Offline indicator */}
-        <div className="flex items-center gap-1.5 bg-slate-100 px-3 py-1 rounded-full text-slate-600 border border-slate-200 text-xs font-semibold">
-          <WifiOff size={13} className="text-slate-500" />
-          <span>Local Mode</span>
+        <div className="flex items-center gap-1.5 bg-slate-100 px-2 py-1 sm:px-3 rounded-full text-slate-600 border border-slate-200 text-xs font-semibold whitespace-nowrap">
+          <WifiOff size={13} className="text-slate-500 flex-shrink-0" />
+          <span className="hidden sm:inline">Local Mode</span>
         </div>
 
         {/* DB Connected status symbol */}
         <div 
-          className={`p-2 rounded-full border flex items-center justify-center transition-colors duration-250 ${
+          className={`p-1.5 sm:p-2 rounded-full border flex items-center justify-center transition-colors duration-250 ${
             dbActive 
               ? 'bg-emerald-50 text-emerald-600 border-emerald-200' 
               : 'bg-rose-50 text-rose-600 border-rose-200 animate-pulse'
           }`}
           title={dbActive ? 'Database: Active' : 'Database: Disconnected'}
         >
-          <Database size={15} className={dbActive ? 'text-emerald-500' : 'text-rose-500'} />
+          <Database size={14} className={dbActive ? 'text-emerald-500' : 'text-rose-500'} />
         </div>
 
         {/* Time */}
-        <div className="flex items-center gap-1.5 text-slate-500 text-sm font-mono bg-slate-50 px-3 py-1 rounded-lg border border-slate-100">
-          <Clock size={14} className="text-slate-400" />
+        <div className="hidden sm:flex items-center gap-1.5 text-slate-500 text-sm font-mono bg-slate-50 px-2.5 py-1 rounded-lg border border-slate-100 whitespace-nowrap">
+          <Clock size={14} className="text-slate-400 flex-shrink-0" />
           <span>{time}</span>
         </div>
       </div>

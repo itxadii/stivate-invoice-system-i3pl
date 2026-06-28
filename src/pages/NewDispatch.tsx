@@ -122,23 +122,13 @@ export const NewDispatch: React.FC<NewDispatchProps> = ({
     const query = pullListInput.trim();
     if (!query) return;
 
-    // 1. Try to parse as email subject line
+    // Collapse multiple spaces and strip FW:/RE: prefixes
     let cleanText = query.replace(/\s+/g, ' ').trim();
     cleanText = cleanText.replace(/^(FW:|FWD:|RE:)\s*/i, '').trim();
 
-    const expectedLength = 47;
-    if (cleanText.length !== expectedLength) {
-      setSaveStatus({
-        text: `Error: The scanned item must be exactly ${expectedLength} characters. Scanned length: ${cleanText.length} characters. Expected format: "[ID] [PULL_LIST] [KIT_TYPE] [WORKCELL] [PARTS]"`,
-        type: 'error'
-      });
-      setPullListInput('');
-      setTimeout(() => setSaveStatus(null), 5000);
-      return;
-    }
-
     const parts = cleanText.split(' ');
 
+    // 1. Check if it matches the multi-part email subject format
     if (parts.length >= 4) {
       const idNumber = parts[0];
       const pullListNo = parts[1];
@@ -146,8 +136,8 @@ export const NewDispatch: React.FC<NewDispatchProps> = ({
       const workcell = parts[3];
       const numParts = parts[4] ? (parseInt(parts[4], 10) || 1) : 1;
 
-      // Verify it matches expected subject patterns (ID is digits, Pull List is alphanumeric)
-      if (/^\d+$/.test(idNumber) && /^[A-Z0-9]+$/i.test(pullListNo)) {
+      // Verify basic patterns: ID should be digits, Pull List is alphanumeric (allowing hyphens/underscores)
+      if (/^\d+$/.test(idNumber) && /^[A-Z0-9_-]+$/i.test(pullListNo)) {
         // Check if duplicate in current list
         if (items.some(item => item.pull_list_no.toLowerCase() === pullListNo.toLowerCase())) {
           setSaveStatus({ text: `Pull List ${pullListNo} already added.`, type: 'error' });
@@ -178,8 +168,51 @@ export const NewDispatch: React.FC<NewDispatchProps> = ({
       }
     }
 
+    // 2. Check if it's a single Pull List Number
+    if (parts.length === 1 && /^[A-Z0-9_-]+$/i.test(cleanText)) {
+      const pullListNo = cleanText;
+      if (items.some(item => item.pull_list_no.toLowerCase() === pullListNo.toLowerCase())) {
+        setSaveStatus({ text: `Pull List ${pullListNo} already added.`, type: 'error' });
+        setPullListInput('');
+        setTimeout(() => setSaveStatus(null), 3000);
+        return;
+      }
+
+      try {
+        const masterItem = await databaseService.searchPullList(pullListNo);
+        if (masterItem) {
+          const newItem: DispatchItem = {
+            pull_list_no: masterItem.pull_list_no,
+            id_number: masterItem.id_number || '',
+            kit_type: masterItem.kit_type || '',
+            workcell: masterItem.workcell || '',
+            parts: masterItem.parts || 1
+          };
+          setItems((prev) => [newItem, ...prev]);
+          setPullListInput('');
+          setSaveStatus(null);
+          return;
+        } else {
+          // Prefill manual item and open modal
+          setManualItem({
+            pull_list_no: pullListNo,
+            id_number: '',
+            kit_type: '',
+            workcell: '',
+            parts: 1
+          });
+          setManualModalOpen(true);
+          setPullListInput('');
+          setSaveStatus(null);
+          return;
+        }
+      } catch (err) {
+        console.error('Failed to query database:', err);
+      }
+    }
+
     setSaveStatus({
-      text: `Error: Scanned text format is invalid. Expected format: "[ID] [PULL_LIST] [KIT_TYPE] [WORKCELL] [PARTS]"`,
+      text: `Error: Scanned text format is invalid. Expected format: "[ID] [PULL_LIST] [KIT_TYPE] [WORKCELL] [PARTS]" or a valid single Pull List Number.`,
       type: 'error'
     });
     setPullListInput('');
@@ -188,7 +221,10 @@ export const NewDispatch: React.FC<NewDispatchProps> = ({
 
   const handleManualItemSave = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!manualItem.pull_list_no) return;
+    if (!manualItem.pull_list_no) {
+      setManualError("Pull List Number is required.");
+      return;
+    }
 
     const newItem: DispatchItem = {
       pull_list_no: manualItem.pull_list_no.trim(),
@@ -198,26 +234,29 @@ export const NewDispatch: React.FC<NewDispatchProps> = ({
       parts: Number(manualItem.parts) || 0
     };
 
-    // Combined format: [ID] [PULL_LIST] [KIT_TYPE] [WORKCELL] [PARTS]
-    const itemString = `${newItem.id_number} ${newItem.pull_list_no} ${newItem.kit_type} ${newItem.workcell} ${newItem.parts}`;
-    const expectedLength = 47;
-    if (itemString.length !== expectedLength) {
-      setManualError(`Combined character length must be exactly ${expectedLength} characters. Current combined length: ${itemString.length} characters.`);
-      return;
-    }
-
     setItems((prev) => [newItem, ...prev]);
     setManualModalOpen(false);
     setManualError(null);
     setPullListInput('');
 
     // Ask to add to master database so future scans auto-fill
-    // (We silently add to pull_list_master in background to help the operator!)
     try {
       databaseService.importMasterData([newItem]);
     } catch (err) {
       console.error('Failed to auto-cache to master data:', err);
     }
+  };
+
+  const handleOpenManualModal = () => {
+    setManualItem({
+      pull_list_no: '',
+      id_number: '',
+      kit_type: '',
+      workcell: '',
+      parts: 1
+    });
+    setManualError(null);
+    setManualModalOpen(true);
   };
 
   const handleRemoveItem = (idx: number) => {
@@ -565,31 +604,41 @@ export const NewDispatch: React.FC<NewDispatchProps> = ({
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <h4 className="text-xs font-extrabold text-slate-400 uppercase tracking-wider">Dispatch Items</h4>
             
-            {/* Totals Summary */}
-            <div className="flex items-center gap-4 text-xs font-bold text-slate-600 bg-slate-50 px-4 py-2 rounded-lg border border-slate-100">
-              <div>
-                Lists: <span className="text-emerald-600 font-mono font-extrabold">{items.length}</span>
-              </div>
-              <div className="w-px h-3 bg-slate-200" />
-              <div>
-                Total Parts: <span className="text-emerald-600 font-mono font-extrabold">{dispatch.total_parts}</span>
+            <div className="flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                onClick={handleOpenManualModal}
+                className="px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-700 rounded-lg text-xs font-bold border border-amber-200 transition-colors cursor-pointer"
+              >
+                + Add Manually
+              </button>
+
+              {/* Totals Summary */}
+              <div className="flex items-center gap-4 text-xs font-bold text-slate-600 bg-slate-50 px-4 py-2 rounded-lg border border-slate-100">
+                <div>
+                  Lists: <span className="text-emerald-600 font-mono font-extrabold">{items.length}</span>
+                </div>
+                <div className="w-px h-3 bg-slate-200" />
+                <div>
+                  Total Parts: <span className="text-emerald-600 font-mono font-extrabold">{dispatch.total_parts}</span>
+                </div>
               </div>
             </div>
           </div>
 
           {/* Pull List Paste Box */}
-          <form onSubmit={handleScanSubmit} className="relative flex items-center w-full">
+          <form onSubmit={handleScanSubmit} className="flex gap-2 w-full">
             <input
               ref={scanInputRef}
               type="text"
               placeholder="Paste Pull List Number or Email Subject line and press Enter..."
               value={pullListInput}
               onChange={(e) => setPullListInput(e.target.value)}
-              className="w-full pl-4 pr-24 py-3 bg-slate-50 text-slate-800 placeholder-slate-400 font-mono border border-slate-200 rounded-lg focus:outline-none focus:border-[#4BB8FA] focus:bg-white transition-all text-sm select-all font-bold tracking-wider focus:ring-2 focus:ring-[#4BB8FA]/20"
+              className="flex-1 px-4 py-3 bg-slate-50 text-slate-800 placeholder-slate-400 font-mono border border-slate-200 rounded-lg focus:outline-none focus:border-[#4BB8FA] focus:bg-white transition-all text-sm select-all font-bold tracking-wider focus:ring-2 focus:ring-[#4BB8FA]/20"
             />
             <button
               type="submit"
-              className="absolute right-2 px-3 py-1.5 bg-[#4BB8FA] text-slate-900 rounded-md text-xs font-bold hover:bg-[#35a0dc] cursor-pointer"
+              className="px-4 py-3 bg-[#4BB8FA] text-slate-900 rounded-lg text-sm font-bold hover:bg-[#35a0dc] cursor-pointer whitespace-nowrap flex-shrink-0"
             >
               Add Pull List
             </button>
@@ -609,7 +658,7 @@ export const NewDispatch: React.FC<NewDispatchProps> = ({
           setManualModalOpen(false);
           setManualError(null);
         }}
-        title="Unknown Pull List Detected"
+        title={manualItem.pull_list_no ? "Unknown Pull List Detected" : "Add Pull List Manually"}
       >
         <form onSubmit={handleManualItemSave} className="space-y-4 select-none">
           {manualError && (
@@ -618,20 +667,30 @@ export const NewDispatch: React.FC<NewDispatchProps> = ({
             </div>
           )}
 
-          <div className="flex items-start gap-3 bg-amber-50 p-3 rounded-lg border border-amber-200 text-amber-900 text-xs font-medium leading-relaxed">
-            <AlertCircle size={16} className="text-amber-500 shrink-0 mt-0.5" />
-            <p>
-              Pull List <strong>{manualItem.pull_list_no}</strong> was not found in SAP Master records. Please input details manually. It will also be indexed to database automatically.
-            </p>
-          </div>
+          {manualItem.pull_list_no ? (
+            <div className="flex items-start gap-3 bg-amber-50 p-3 rounded-lg border border-amber-200 text-amber-900 text-xs font-medium leading-relaxed">
+              <AlertCircle size={16} className="text-amber-500 shrink-0 mt-0.5" />
+              <p>
+                Pull List <strong>{manualItem.pull_list_no}</strong> was not found in SAP Master records. Please input details manually. It will also be indexed to database automatically.
+              </p>
+            </div>
+          ) : (
+            <div className="flex items-start gap-3 bg-blue-50 p-3 rounded-lg border border-blue-200 text-blue-900 text-xs font-medium leading-relaxed">
+              <AlertCircle size={16} className="text-blue-500 shrink-0 mt-0.5" />
+              <p>
+                Please enter the details of the Pull List manually below. This will also cache the item in the database for future scans.
+              </p>
+            </div>
+          )}
 
           <div className="space-y-1">
             <label className="text-xs font-bold text-slate-500 uppercase">Pull List Number</label>
             <input
               type="text"
               value={manualItem.pull_list_no || ''}
-              disabled
-              className="w-full px-3 py-2 border border-slate-200 bg-slate-50 rounded-lg text-sm font-mono text-slate-600 font-bold"
+              onChange={(e) => setManualItem((prev) => ({ ...prev, pull_list_no: e.target.value }))}
+              required
+              className="w-full px-3 py-2 border border-slate-200 bg-slate-50 focus:bg-white rounded-lg text-sm font-mono text-slate-700 font-bold focus:outline-none focus:border-emerald-500"
             />
           </div>
 

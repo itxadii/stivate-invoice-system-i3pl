@@ -51,12 +51,6 @@ export const DispatchHistory: React.FC<DispatchHistoryProps> = ({ onEditDispatch
     let cleanText = query.replace(/\s+/g, ' ').trim();
     cleanText = cleanText.replace(/^(FW:|FWD:|RE:)\s*/i, '').trim();
 
-    const expectedLength = 47;
-    if (cleanText.length !== expectedLength) {
-      setSubjectError(`Invalid format/length! Character length must be exactly ${expectedLength} characters. Scanned length: ${cleanText.length} characters.`);
-      return;
-    }
-
     const parts = cleanText.split(' ');
 
     if (parts.length >= 4) {
@@ -66,7 +60,7 @@ export const DispatchHistory: React.FC<DispatchHistoryProps> = ({ onEditDispatch
       const workcell = parts[3];
       const numParts = parts[4] ? (parseInt(parts[4], 10) || 1) : 1;
 
-      if (/^\d+$/.test(idNumber) && /^[A-Z0-9]+$/i.test(pullListNo)) {
+      if (/^\d+$/.test(idNumber) && /^[A-Z0-9_-]+$/i.test(pullListNo)) {
         try {
           const data = await databaseService.getDispatch(subjectTargetId);
           if (!data) {
@@ -108,9 +102,52 @@ export const DispatchHistory: React.FC<DispatchHistoryProps> = ({ onEditDispatch
         }
         return;
       }
+    } else if (parts.length === 1 && /^[A-Z0-9_-]+$/i.test(cleanText)) {
+      const pullListNo = cleanText;
+      try {
+        const data = await databaseService.getDispatch(subjectTargetId);
+        if (!data) {
+          setSubjectError('Dispatch not found.');
+          return;
+        }
+
+        if (data.items.some((item: any) => item.pull_list_no.toLowerCase() === pullListNo.toLowerCase())) {
+          setSubjectError(`Pull List ${pullListNo} already exists in this dispatch.`);
+          return;
+        }
+
+        const masterItem = await databaseService.searchPullList(pullListNo);
+        if (masterItem) {
+          const newItem: DispatchItem = {
+            pull_list_no: masterItem.pull_list_no,
+            id_number: masterItem.id_number || '',
+            kit_type: masterItem.kit_type || '',
+            workcell: masterItem.workcell || '',
+            parts: masterItem.parts || 1
+          };
+
+          const updatedItems = [...data.items, newItem];
+          const updatedDispatch = {
+            ...data,
+            total_parts: data.total_parts + (masterItem.parts || 1)
+          };
+
+          await databaseService.saveDispatch(updatedDispatch, updatedItems);
+
+          setMessage({ text: `Successfully added ${pullListNo} to dispatch ${data.dc_no}.`, type: 'success' });
+          setSubjectModalOpen(false);
+          fetchDispatches(searchQuery);
+          setTimeout(() => setMessage(null), 4000);
+        } else {
+          setSubjectError(`Pull List ${pullListNo} not found in database. Add new items on the New Dispatch screen first to cache them.`);
+        }
+      } catch (err: any) {
+        setSubjectError(`Failed to save: ${err.message || err}`);
+      }
+      return;
     }
 
-    setSubjectError('Invalid subject format. Expected: "[ID] [PULL_LIST] [KIT_TYPE] [WORKCELL] [PARTS]"');
+    setSubjectError('Invalid format. Expected: "[ID] [PULL_LIST] [KIT_TYPE] [WORKCELL] [PARTS]" or a valid single Pull List Number.');
   };
 
   const fetchDispatches = useCallback(async (query = '', append = false) => {

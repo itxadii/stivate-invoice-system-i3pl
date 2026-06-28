@@ -19,7 +19,7 @@ win:
   target:
     - nsis
     - portable
-  artifactName: ${productName}-${version}-${arch}.${ext}
+  artifactName: ${productName}-Setup-${version}-${arch}.${ext}
   icon: build/icon.png
 nsis:
   oneClick: false
@@ -28,7 +28,7 @@ nsis:
   createStartMenuShortcut: true
   shortcutName: I3PL Invoice System
 portable:
-  artifactName: ${productName}-${version}-${arch}.exe
+  artifactName: ${productName}-Portable-${version}-${arch}.${ext}
 asar: true
 asarUnpack:
   - node_modules/better-sqlite3/**

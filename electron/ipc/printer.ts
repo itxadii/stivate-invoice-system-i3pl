@@ -559,7 +559,7 @@ export const printCombinedDispatch = async (dispatch: any, items: any[]): Promis
     try {
       const printOptions: any = {
         copies: 3,
-        side: 'duplex',
+        side: 'simplex',
       };
       const printerName = settings.printer && settings.printer !== 'Default'
         ? settings.printer
