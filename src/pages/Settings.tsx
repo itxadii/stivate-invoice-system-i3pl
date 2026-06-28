@@ -659,7 +659,7 @@ export const Settings: React.FC<SettingsProps> = ({ onSettingsSaved }) => {
         {/* Created By Logo (bottom right corner) */}
         <div className="flex flex-col items-center justify-end pt-16 mt-auto space-y-3 opacity-95 select-none">
           <span className="text-xs font-bold text-slate-400 uppercase tracking-widest">Software Developed By</span>
-          <img src="/stivate.png" alt="Stivate Logo" className="h-20 w-auto object-contain brightness-95" />
+          <img src="stivate.png" alt="Stivate Logo" className="h-20 w-auto object-contain brightness-95" />
         </div>
       </div>
     </div>

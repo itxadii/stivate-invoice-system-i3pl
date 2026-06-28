@@ -270,16 +270,25 @@ const buildChallanPage = (pdfDoc: PDFDocument, dispatch: any, font: any, fontBol
   page.drawText('Page 1 of 1', { x: width - margin - 60, y: 15, size: 8, font, color: rgb(0.6, 0.6, 0.6) });
 };
 
-const buildBarcodePages = (pdfDoc: PDFDocument, items: any[], font: any, fontBold: any, logo: any) => {
+const buildBarcodePages = (pdfDoc: PDFDocument, items: any[], font: any, fontBold: any, logo: any, dispatch?: any) => {
   const margin = 30;
   const printableWidth = 535;
 
-  let dcNo = 'Draft';
-  let dateStr = new Date().toISOString().split('T')[0];
-  let palletsCount = 1;
+  let dcNo = dispatch?.dc_no || 'Draft';
+  let dateStr = dispatch?.date || new Date().toISOString().split('T')[0];
+  let palletsCount = dispatch?.total_pallets || 1;
   let plantName = 'JABIL PLANT';
 
-  if (items.length > 0 && items[0].dispatch_id) {
+  if (dispatch?.address) {
+    const rawAddrLower = (dispatch.address || '').toLowerCase();
+    if (rawAddrLower.includes('jabil')) {
+      plantName = 'JABIL PLANT';
+    } else if (rawAddrLower.includes('ericsson')) {
+      plantName = 'ERICSSON PLANT';
+    } else {
+      plantName = (dispatch.address || 'AS PER LIST').split('\n')[0].substring(0, 20).toUpperCase();
+    }
+  } else if (items.length > 0 && items[0].dispatch_id) {
     try {
       const { getDispatch } = require('./database');
       const dbDisp = getDispatch(items[0].dispatch_id);
@@ -331,9 +340,9 @@ const buildBarcodePages = (pdfDoc: PDFDocument, items: any[], font: any, fontBol
     });
 
     p.drawText(`DC NO: ${dcNo}`, { x: margin + 15, y: yCursor - 59, size: 9, font: fontBold });
-    p.drawText(`NO OF PALLETS: ${palletsCount}`, { x: margin + 120, y: yCursor - 59, size: 9, font: fontBold });
-    p.drawText(`ADDRESS: ${plantName}`, { x: margin + 250, y: yCursor - 59, size: 9, font: fontBold });
-    p.drawText(`DATE: ${dateStr}`, { x: margin + 430, y: yCursor - 59, size: 9, font: fontBold });
+    p.drawText(`NO OF PALLETS: ${palletsCount}`, { x: margin + 160, y: yCursor - 59, size: 9, font: fontBold });
+    p.drawText(`ADDRESS: ${plantName}`, { x: margin + 275, y: yCursor - 59, size: 9, font: fontBold });
+    p.drawText(`DATE: ${dateStr}`, { x: margin + 420, y: yCursor - 59, size: 9, font: fontBold });
 
     yCursor -= 70;
 
@@ -533,7 +542,7 @@ export const printCombinedDispatch = async (dispatch: any, items: any[]): Promis
     const logo = await getLogoImage(pdfDoc);
 
     buildChallanPage(pdfDoc, dispatch, font, fontBold, logo);
-    buildBarcodePages(pdfDoc, items, font, fontBold, logo);
+    buildBarcodePages(pdfDoc, items, font, fontBold, logo, dispatch);
 
     const printsDir = settings.printsFolder;
     if (!fs.existsSync(printsDir)) {

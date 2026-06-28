@@ -223,10 +223,13 @@ export const DispatchHistory: React.FC<DispatchHistoryProps> = ({ onEditDispatch
     if (!dispatchEntry.id || dispatchEntry.status === 'completed') return;
 
     try {
-      await databaseService.saveDispatch({ ...dispatchEntry, status: 'completed' }, dispatchEntry.items || []);
-      setMessage({ text: `Dispatch ${dispatchEntry.dc_no} marked as completed.`, type: 'success' });
-      fetchDispatches(searchQuery);
-      setTimeout(() => setMessage(null), 3000);
+      const fullDispatch = await databaseService.getDispatch(dispatchEntry.id);
+      if (fullDispatch) {
+        await databaseService.saveDispatch({ ...fullDispatch, status: 'completed' }, fullDispatch.items || []);
+        setMessage({ text: `Dispatch ${dispatchEntry.dc_no} marked as completed.`, type: 'success' });
+        fetchDispatches(searchQuery);
+        setTimeout(() => setMessage(null), 3000);
+      }
     } catch (err: any) {
       setMessage({ text: `Failed to update status: ${err.message || err}`, type: 'error' });
     }

@@ -18,7 +18,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
   return (
     <aside className="w-64 bg-white text-slate-800 flex flex-col border-r border-slate-200 h-screen select-none">
       <div className="p-5 pl-6 border-b border-slate-100 flex items-center justify-start">
-        <img src="/logo.png" alt="i3pl Logo" className="h-14 w-auto object-contain" />
+        <img src="logo.png" alt="i3pl Logo" className="h-14 w-auto object-contain" />
       </div>
 
       <nav className="flex-1 px-4 py-6 space-y-1">
@@ -53,7 +53,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
 
       <div className="p-4 border-t border-slate-100 flex items-center justify-center gap-2 select-none">
         <span className="text-[9px] text-slate-400 font-extrabold uppercase tracking-widest whitespace-nowrap">Copyrighted by</span>
-        <img src="/stivate.png" alt="Stivate" className="h-[60px] w-auto object-contain brightness-95 opacity-65 hover:opacity-95 transition-all duration-150" />
+        <img src="stivate.png" alt="Stivate" className="h-[60px] w-auto object-contain brightness-95 opacity-65 hover:opacity-95 transition-all duration-150" />
       </div>
     </aside>
   );
