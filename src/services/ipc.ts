@@ -1,4 +1,4 @@
-import type { AppSettings, Dispatch, DispatchItem, PullListMaster, DashboardStats } from '../types';
+import type { AppSettings, Dispatch, DispatchItem, PullListMaster, DashboardStats, PipelineStats } from '../types';
 
 declare global {
   interface Window {
@@ -11,13 +11,14 @@ declare global {
         saveDispatch(dispatch: Partial<Dispatch>, items: DispatchItem[]): Promise<{ id: number; dc_no: string }>;
         deleteDispatch(id: number): Promise<boolean>;
         getDispatch(id: number): Promise<Dispatch & { items: DispatchItem[] }>;
-        getAllDispatches(limit?: number, offset?: number): Promise<Dispatch[]>;
-        searchDispatches(query: string, limit?: number, offset?: number): Promise<Dispatch[]>;
+        getAllDispatches(status?: string | string[], limit?: number, offset?: number): Promise<Dispatch[]>;
+        searchDispatches(query: string, status?: string | string[], limit?: number, offset?: number): Promise<Dispatch[]>;
         searchPullList(pullListNo: string): Promise<PullListMaster | null>;
         importMasterData(rows: Partial<PullListMaster>[]): Promise<number>;
         getDashboardStats(): Promise<DashboardStats>;
         getTrendData(range: string): Promise<{ date: string; count: number }[]>;
-        getReports(type: string, startDate?: string, endDate?: string): Promise<any[]>;
+        getReports(type: string, startDate?: string, endDate?: string, destination?: string): Promise<any[]>;
+        getPipelineStats(): Promise<PipelineStats>;
       };
       backup: {
         triggerBackup(): Promise<{ success: boolean; message: string }>;
@@ -33,6 +34,7 @@ declare global {
         download(): Promise<void>;
         install(): Promise<void>;
         getVersion(): Promise<{ currentVersion: string | { version: string } }>;
+        onStatus(callback: (value: any) => void): () => void;
       };
     };
   }
@@ -64,13 +66,13 @@ export const databaseService = {
     if (!api) throw new Error('Electron API not available');
     return api.db.getDispatch(id);
   },
-  getAllDispatches: async (limit?: number, offset?: number): Promise<Dispatch[]> => {
+  getAllDispatches: async (status?: string | string[], limit?: number, offset?: number): Promise<Dispatch[]> => {
     if (!api) throw new Error('Electron API not available');
-    return api.db.getAllDispatches(limit, offset);
+    return api.db.getAllDispatches(status, limit, offset);
   },
-  searchDispatches: async (query: string, limit?: number, offset?: number): Promise<Dispatch[]> => {
+  searchDispatches: async (query: string, status?: string | string[], limit?: number, offset?: number): Promise<Dispatch[]> => {
     if (!api) throw new Error('Electron API not available');
-    return api.db.searchDispatches(query, limit, offset);
+    return api.db.searchDispatches(query, status, limit, offset);
   },
   searchPullList: async (pullListNo: string): Promise<PullListMaster | null> => {
     if (!api) throw new Error('Electron API not available');
@@ -88,9 +90,13 @@ export const databaseService = {
     if (!api) throw new Error('Electron API not available');
     return api.db.getTrendData(range);
   },
-  getReports: async (type: string, startDate?: string, endDate?: string): Promise<any[]> => {
+  getReports: async (type: string, startDate?: string, endDate?: string, destination?: string): Promise<any[]> => {
     if (!api) throw new Error('Electron API not available');
-    return api.db.getReports(type, startDate, endDate);
+    return api.db.getReports(type, startDate, endDate, destination);
+  },
+  getPipelineStats: async (): Promise<PipelineStats> => {
+    if (!api) throw new Error('Electron API not available');
+    return api.db.getPipelineStats();
   }
 };
 
@@ -136,5 +142,9 @@ export const updaterService = {
   getVersion: async (): Promise<{ currentVersion: string | { version: string } }> => {
     if (!api) throw new Error('Electron API not available');
     return api.updater.getVersion();
+  },
+  onStatus: (callback: (value: any) => void): (() => void) => {
+    if (!api) throw new Error('Electron API not available');
+    return api.updater.onStatus(callback);
   }
 };

@@ -54,41 +54,48 @@ export const DispatchTable: React.FC<DispatchTableProps> = ({
               </td>
             </tr>
           ) : (
-            items.map((item, idx) => (
-              <tr key={idx} className="hover:bg-slate-50/50 transition-colors duration-100">
-                <td className="px-4 py-3 text-sm font-mono text-slate-400 font-medium">
-                  {idx + 1}
-                </td>
-                <td className="px-4 py-3 text-sm font-mono text-slate-800 font-bold">
-                  {item.pull_list_no}
-                </td>
-                <td className="px-4 py-3 text-sm text-slate-600 font-medium">
-                  {item.id_number}
-                </td>
-                <td className="px-4 py-3 text-sm text-slate-600 font-medium">
-                  <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-slate-100 text-slate-700">
-                    {item.kit_type}
-                  </span>
-                </td>
-                <td className="px-4 py-3 text-sm text-slate-600 font-medium">
-                  {item.workcell}
-                </td>
-                <td className="px-4 py-3 text-sm font-mono text-slate-800 text-right font-bold">
-                  {item.parts}
-                </td>
-                {!readOnly && onRemoveItem && (
-                  <td className="px-4 py-3 text-center">
-                    <button
-                      type="button"
-                      onClick={() => onRemoveItem(idx)}
-                      className="p-1 rounded-md text-rose-500 hover:bg-rose-50 hover:text-rose-700 transition-colors duration-100 cursor-pointer"
-                    >
-                      <Trash2 size={15} />
-                    </button>
+            items.map((item, idx) => {
+              const displayPullList = item.pull_list_no.replace(/_pending$/, '');
+              
+              return (
+                <tr key={idx} className="hover:bg-slate-50/50 transition-colors duration-100">
+                  <td className="px-4 py-3 text-sm font-mono text-slate-400 font-medium">
+                    {idx + 1}
                   </td>
-                )}
-              </tr>
-            ))
+                  <td className="px-4 py-3 text-sm font-mono text-slate-800 font-bold">
+                    {displayPullList}
+                  </td>
+                  <td className="px-4 py-3 text-sm text-slate-600 font-medium">
+                    {item.id_number}
+                  </td>
+                  <td className="px-4 py-3 text-sm text-slate-600 font-medium">
+                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-slate-100 text-slate-700">
+                      {item.kit_type}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 text-sm text-slate-600 font-medium">
+                    {item.workcell}
+                  </td>
+                  <td className="px-4 py-3 text-sm font-mono text-slate-800 text-right font-bold">
+                    {item.parts}
+                  </td>
+                  {!readOnly && onRemoveItem && (
+                    <td className="px-4 py-3 text-center">
+                      {onRemoveItem && (
+                        <button
+                          type="button"
+                          onClick={() => onRemoveItem(idx)}
+                          className="p-1 rounded-md text-rose-500 hover:bg-rose-50 hover:text-rose-700 transition-colors duration-100 cursor-pointer"
+                          title="Delete"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      )}
+                    </td>
+                  )}
+                </tr>
+              );
+            })
           )}
         </tbody>
       </table>

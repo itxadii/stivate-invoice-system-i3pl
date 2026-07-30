@@ -1,5 +1,5 @@
 import React from 'react';
-import { LayoutDashboard, Plus, History, BarChart3, Settings } from 'lucide-react';
+import { LayoutDashboard, Truck, History, BarChart3, Settings } from 'lucide-react';
 
 interface SidebarProps {
   activeTab: string;
@@ -9,8 +9,8 @@ interface SidebarProps {
 export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => {
   const menuItems = [
     { id: 'dashboard', name: 'Dashboard', icon: LayoutDashboard },
-    { id: 'new-dispatch', name: 'New Dispatch', icon: Plus, shortcut: 'Ctrl+N' },
-    { id: 'history', name: 'Dispatch History', icon: History, shortcut: 'Ctrl+H' },
+    { id: 'pipeline', name: 'Dispatch Pipeline', icon: Truck, shortcut: 'Ctrl+N' },
+    { id: 'completed', name: 'Completed', icon: History, shortcut: 'Ctrl+H' },
     { id: 'reports', name: 'Reports', icon: BarChart3 },
     { id: 'settings', name: 'Settings', icon: Settings },
   ];

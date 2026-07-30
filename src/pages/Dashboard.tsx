@@ -8,6 +8,23 @@ interface DashboardProps {
   onEditDispatch: (id: number) => void;
 }
 
+const formatDateTimeDisplay = (dateStr: string) => {
+  if (!dateStr) return '';
+  try {
+    const norm = dateStr.includes('T') ? dateStr : dateStr.replace(' ', 'T');
+    const dObj = new Date(norm);
+    if (!isNaN(dObj.getTime())) {
+      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      let hours = dObj.getHours();
+      const ampm = hours >= 12 ? 'PM' : 'AM';
+      hours = hours % 12 || 12;
+      const mins = String(dObj.getMinutes()).padStart(2, '0');
+      return `${dObj.getDate()}-${months[dObj.getMonth()]}-${dObj.getFullYear().toString().slice(-2)} ${String(hours).padStart(2, '0')}:${mins} ${ampm}`;
+    }
+  } catch (e) {}
+  return dateStr;
+};
+
 export const Dashboard: React.FC<DashboardProps> = ({ setActiveTab, onEditDispatch }) => {
   const [stats, setStats] = useState<DashboardStats>({
     todayDispatches: 0,
@@ -313,7 +330,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ setActiveTab, onEditDispat
         <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
           <h4 className="text-sm font-bold text-slate-700 uppercase tracking-wider">Recent Dispatches</h4>
           <button
-            onClick={() => setActiveTab('history')}
+            onClick={() => setActiveTab('completed')}
             className="flex items-center gap-1 text-xs font-bold text-emerald-600 hover:text-emerald-800 transition-colors duration-150 cursor-pointer"
           >
             <span>See All Dispatches</span>
@@ -335,7 +352,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ setActiveTab, onEditDispat
               <thead className="bg-slate-50/50">
                 <tr>
                   <th className="px-6 py-3 text-left text-xs font-bold text-slate-400 uppercase tracking-wider">DC Number</th>
-                  <th className="px-6 py-3 text-left text-xs font-bold text-slate-400 uppercase tracking-wider">Date</th>
+                  <th className="px-6 py-3 text-left text-xs font-bold text-slate-400 uppercase tracking-wider">Date & Time</th>
                   <th className="px-6 py-3 text-left text-xs font-bold text-slate-400 uppercase tracking-wider">Status</th>
                   <th className="px-6 py-3 text-left text-xs font-bold text-slate-400 uppercase tracking-wider">Vehicle No</th>
                   <th className="px-6 py-3 text-left text-xs font-bold text-slate-400 uppercase tracking-wider">Supervisor</th>
@@ -349,16 +366,18 @@ export const Dashboard: React.FC<DashboardProps> = ({ setActiveTab, onEditDispat
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-mono font-bold text-slate-800">
                       {d.dc_no}
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">
-                      {d.date}
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-600 font-medium">
+                      {formatDateTimeDisplay(d.date)}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-600 font-medium">
-                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold ${
-                        d.status === 'draft'
-                          ? 'bg-amber-50 text-amber-800 border border-amber-200'
-                          : 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold border ${
+                        d.status === 'completed'
+                          ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                          : d.status === 'ready'
+                            ? 'bg-indigo-50 text-indigo-800 border-indigo-200'
+                            : 'bg-amber-50 text-amber-800 border-amber-200'
                       }`}>
-                        {d.status === 'draft' ? 'Draft' : 'Completed'}
+                        {d.status === 'completed' ? 'Completed' : d.status === 'ready' ? 'Ready' : 'Loading'}
                       </span>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-600 font-medium">

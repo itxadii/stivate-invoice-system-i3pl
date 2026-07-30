@@ -33,7 +33,7 @@ export interface Dispatch {
   transaction_type?: string;
   created_by: string;
   created_at?: string;
-  status?: 'draft' | 'completed';
+  status?: 'loading' | 'ready' | 'completed';
   items?: DispatchItem[];
 }
 
@@ -98,4 +98,12 @@ export interface SupplierReport {
   dispatch_count: number;
   total_pallets: number;
   total_parts: number;
+}
+
+export interface PipelineStats {
+  loadingCount: number;
+  readyCount: number;
+  completedTodayCount: number;
+  pendingPullLists: number;
+  totalPullListsToday: number;
 }

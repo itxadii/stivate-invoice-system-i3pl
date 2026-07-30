@@ -1,22 +1,43 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { databaseService, printService } from '../services/ipc';
-import type { Dispatch, DispatchItem } from '../types';
+import { databaseService, printService, settingsService } from '../services/ipc';
+import type { Dispatch, DispatchItem, AppSettings } from '../types';
 import { SearchBox } from '../components/SearchBox';
 import { Modal } from '../components/Modal';
 import { DispatchTable } from '../components/DispatchTable';
-import { Printer, Eye, Edit3, Trash2, Calendar, AlertTriangle, Plus } from 'lucide-react';
+import { Printer, Eye, Trash2, Calendar, AlertTriangle, Download } from 'lucide-react';
 
-interface DispatchHistoryProps {
-  onEditDispatch: (id: number) => void;
-}
+interface DispatchHistoryProps {}
 
-export const DispatchHistory: React.FC<DispatchHistoryProps> = ({ onEditDispatch }) => {
+const formatDateTimeDisplay = (dateStr: string) => {
+  if (!dateStr) return '';
+  try {
+    const norm = dateStr.includes('T') ? dateStr : dateStr.replace(' ', 'T');
+    const dObj = new Date(norm);
+    if (!isNaN(dObj.getTime())) {
+      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      let hours = dObj.getHours();
+      const ampm = hours >= 12 ? 'PM' : 'AM';
+      hours = hours % 12 || 12;
+      const mins = String(dObj.getMinutes()).padStart(2, '0');
+      return `${dObj.getDate()}-${months[dObj.getMonth()]}-${dObj.getFullYear().toString().slice(-2)} ${String(hours).padStart(2, '0')}:${mins} ${ampm}`;
+    }
+  } catch (e) {}
+  return dateStr;
+};
+
+export const DispatchHistory: React.FC<DispatchHistoryProps> = () => {
   const [dispatches, setDispatches] = useState<Dispatch[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [page, setPage] = useState(0);
   const [hasMore, setHasMore] = useState(true);
+
+  // Filters State
+  const [settings, setSettings] = useState<AppSettings | null>(null);
+  const [dateFilter, setDateFilter] = useState('');
+  const [vehicleFilter, setVehicleFilter] = useState('');
+  const [supervisorFilter, setSupervisorFilter] = useState('');
 
   const observerRef = useRef<IntersectionObserver | null>(null);
 
@@ -30,126 +51,6 @@ export const DispatchHistory: React.FC<DispatchHistoryProps> = ({ onEditDispatch
 
   const [message, setMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
 
-  // Quick Add Subject Modal State
-  const [subjectModalOpen, setSubjectModalOpen] = useState(false);
-  const [subjectTargetId, setSubjectTargetId] = useState<number | null>(null);
-  const [subjectText, setSubjectText] = useState('');
-  const [subjectError, setSubjectError] = useState<string | null>(null);
-
-  const handleAddSubjectClick = (id: number) => {
-    setSubjectTargetId(id);
-    setSubjectText('');
-    setSubjectError(null);
-    setSubjectModalOpen(true);
-  };
-
-  const handleAddSubjectSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const query = subjectText.trim();
-    if (!query || !subjectTargetId) return;
-
-    let cleanText = query.replace(/\s+/g, ' ').trim();
-    cleanText = cleanText.replace(/^(FW:|FWD:|RE:)\s*/i, '').trim();
-
-    const parts = cleanText.split(' ');
-
-    if (parts.length >= 4) {
-      const idNumber = parts[0];
-      const pullListNo = parts[1];
-      const kitType = parts[2];
-      const workcell = parts[3];
-      const numParts = parts[4] ? (parseInt(parts[4], 10) || 1) : 1;
-
-      if (/^\d+$/.test(idNumber) && /^[A-Z0-9_-]+$/i.test(pullListNo)) {
-        try {
-          const data = await databaseService.getDispatch(subjectTargetId);
-          if (!data) {
-            setSubjectError('Dispatch not found.');
-            return;
-          }
-
-          if (data.items.some((item: any) => item.pull_list_no.toLowerCase() === pullListNo.toLowerCase())) {
-            setSubjectError(`Pull List ${pullListNo} already exists in this dispatch.`);
-            return;
-          }
-
-          const newItem: DispatchItem = {
-            pull_list_no: pullListNo,
-            id_number: idNumber,
-            kit_type: kitType,
-            workcell: workcell,
-            parts: numParts
-          };
-
-          const updatedItems = [...data.items, newItem];
-          const updatedDispatch = {
-            ...data,
-            total_parts: data.total_parts + numParts
-          };
-
-          await databaseService.saveDispatch(updatedDispatch, updatedItems);
-          
-          try {
-            databaseService.importMasterData([newItem]);
-          } catch (err) {}
-
-          setMessage({ text: `Successfully added ${pullListNo} to dispatch ${data.dc_no}.`, type: 'success' });
-          setSubjectModalOpen(false);
-          fetchDispatches(searchQuery);
-          setTimeout(() => setMessage(null), 4000);
-        } catch (err: any) {
-          setSubjectError(`Failed to save: ${err.message || err}`);
-        }
-        return;
-      }
-    } else if (parts.length === 1 && /^[A-Z0-9_-]+$/i.test(cleanText)) {
-      const pullListNo = cleanText;
-      try {
-        const data = await databaseService.getDispatch(subjectTargetId);
-        if (!data) {
-          setSubjectError('Dispatch not found.');
-          return;
-        }
-
-        if (data.items.some((item: any) => item.pull_list_no.toLowerCase() === pullListNo.toLowerCase())) {
-          setSubjectError(`Pull List ${pullListNo} already exists in this dispatch.`);
-          return;
-        }
-
-        const masterItem = await databaseService.searchPullList(pullListNo);
-        if (masterItem) {
-          const newItem: DispatchItem = {
-            pull_list_no: masterItem.pull_list_no,
-            id_number: masterItem.id_number || '',
-            kit_type: masterItem.kit_type || '',
-            workcell: masterItem.workcell || '',
-            parts: masterItem.parts || 1
-          };
-
-          const updatedItems = [...data.items, newItem];
-          const updatedDispatch = {
-            ...data,
-            total_parts: data.total_parts + (masterItem.parts || 1)
-          };
-
-          await databaseService.saveDispatch(updatedDispatch, updatedItems);
-
-          setMessage({ text: `Successfully added ${pullListNo} to dispatch ${data.dc_no}.`, type: 'success' });
-          setSubjectModalOpen(false);
-          fetchDispatches(searchQuery);
-          setTimeout(() => setMessage(null), 4000);
-        } else {
-          setSubjectError(`Pull List ${pullListNo} not found in database. Add new items on the New Dispatch screen first to cache them.`);
-        }
-      } catch (err: any) {
-        setSubjectError(`Failed to save: ${err.message || err}`);
-      }
-      return;
-    }
-
-    setSubjectError('Invalid format. Expected: "[ID] [PULL_LIST] [KIT_TYPE] [WORKCELL] [PARTS]" or a valid single Pull List Number.');
-  };
-
   const fetchDispatches = useCallback(async (query = '', append = false) => {
     if (append) {
       setLoadingMore(true);
@@ -162,9 +63,9 @@ export const DispatchHistory: React.FC<DispatchHistoryProps> = ({ onEditDispatch
 
       let data;
       if (query.trim()) {
-        data = await databaseService.searchDispatches(query, limit, offset);
+        data = await databaseService.searchDispatches(query, 'completed', limit, offset);
       } else {
-        data = await databaseService.getAllDispatches(limit, offset);
+        data = await databaseService.getAllDispatches('completed', limit, offset);
       }
 
       if (append) {
@@ -176,7 +77,7 @@ export const DispatchHistory: React.FC<DispatchHistoryProps> = ({ onEditDispatch
       }
       setHasMore(data.length === limit);
     } catch (err) {
-      console.error('Failed to load dispatch history:', err);
+      console.error('Failed to load completed dispatches:', err);
     } finally {
       setLoading(false);
       setLoadingMore(false);
@@ -185,11 +86,75 @@ export const DispatchHistory: React.FC<DispatchHistoryProps> = ({ onEditDispatch
 
   useEffect(() => {
     fetchDispatches();
+
+    const loadSettings = async () => {
+      try {
+        const data = await settingsService.load();
+        setSettings(data);
+      } catch (err) {
+        console.error('Failed to load settings in completed dispatches archive:', err);
+      }
+    };
+    loadSettings();
   }, []);
 
   const handleSearch = (val: string) => {
     setSearchQuery(val);
     fetchDispatches(val, false);
+  };
+
+  const filteredDispatches = dispatches.filter(d => {
+    if (dateFilter && !d.date.startsWith(dateFilter)) return false;
+    if (vehicleFilter && !d.vehicle_no.toLowerCase().includes(vehicleFilter.toLowerCase())) return false;
+    if (supervisorFilter && supervisorFilter !== '' && d.supplier_name !== supervisorFilter) return false;
+    return true;
+  });
+
+  const handleExportCSV = () => {
+    if (filteredDispatches.length === 0) return;
+
+    const headers = [
+      'DC Number',
+      'Date',
+      'Vehicle No',
+      'Supervisor',
+      'Total Pull Lists',
+      'Total Parts',
+      'Consignee Address',
+      'Particulars',
+      'Scanning By',
+      'Verify By',
+      'Transaction Type'
+    ];
+
+    const rows = filteredDispatches.map(d => [
+      d.dc_no,
+      d.date,
+      d.vehicle_no,
+      d.supplier_name,
+      d.total_pallets,
+      d.total_parts,
+      `"${(d.address || '').replace(/"/g, '""').replace(/\n/g, ' ')}"`,
+      `"${(d.particular || '').replace(/"/g, '""').replace(/\n/g, ' ')}"`,
+      d.scanning_by || '',
+      d.verify_by || '',
+      d.transaction_type || ''
+    ]);
+
+    const csvContent = [
+      headers.join(','),
+      ...rows.map(r => r.join(','))
+    ].join('\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', `completed_dispatches_${new Date().toISOString().split('T')[0]}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   const lastElementRef = useCallback((node: HTMLDivElement | null) => {
@@ -256,35 +221,80 @@ export const DispatchHistory: React.FC<DispatchHistoryProps> = ({ onEditDispatch
     }
   };
 
-  const handleMarkCompleted = async (dispatchEntry: Dispatch) => {
-    if (!dispatchEntry.id || dispatchEntry.status === 'completed') return;
 
-    try {
-      const fullDispatch = await databaseService.getDispatch(dispatchEntry.id);
-      if (fullDispatch) {
-        await databaseService.saveDispatch({ ...fullDispatch, status: 'completed' }, fullDispatch.items || []);
-        setMessage({ text: `Dispatch ${dispatchEntry.dc_no} marked as completed.`, type: 'success' });
-        fetchDispatches(searchQuery);
-        setTimeout(() => setMessage(null), 3000);
-      }
-    } catch (err: any) {
-      setMessage({ text: `Failed to update status: ${err.message || err}`, type: 'error' });
-    }
-  };
 
   return (
     <div className="space-y-6">
-      {/* Header and Search */}
-      <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <h3 className="text-md font-bold text-slate-800 uppercase tracking-wide">Shipment Archive</h3>
-          <p className="text-xs text-slate-400">Search and manage delivery invoices</p>
+      {/* Header, Search, and Filters */}
+      <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-4">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-100 pb-3">
+          <div>
+            <h3 className="text-md font-bold text-slate-800 uppercase tracking-wide">Completed Dispatches</h3>
+            <p className="text-xs text-slate-400">Search, view, and export finalized delivery invoices</p>
+          </div>
+          <div className="flex items-center gap-3">
+            <SearchBox
+              value={searchQuery}
+              onChange={handleSearch}
+              placeholder="Search by DC, Pull List..."
+            />
+            <button
+              onClick={handleExportCSV}
+              disabled={filteredDispatches.length === 0}
+              className="flex items-center gap-1.5 px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition-colors cursor-pointer disabled:bg-slate-200 disabled:text-slate-400 shrink-0"
+            >
+              <Download size={14} />
+              <span>Export CSV</span>
+            </button>
+          </div>
         </div>
-        <SearchBox
-          value={searchQuery}
-          onChange={handleSearch}
-          placeholder="Filter by DC, Pull List, Vehicle, Date, Supervisor..."
-        />
+
+        {/* Filters Controls Grid */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-1">
+          {/* Date Filter */}
+          <div className="space-y-1">
+            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block font-sans">Filter by Date</label>
+            <input
+              type="date"
+              value={dateFilter}
+              onChange={(e) => setDateFilter(e.target.value)}
+              className="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-xs bg-slate-50 focus:outline-none focus:bg-white text-slate-700 font-medium"
+            />
+          </div>
+
+          {/* Vehicle Filter */}
+          <div className="space-y-1">
+            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block font-sans">Filter by Vehicle No</label>
+            <input
+              type="text"
+              placeholder="e.g. MH-12..."
+              list="vehicles-archive-datalist"
+              value={vehicleFilter}
+              onChange={(e) => setVehicleFilter(e.target.value)}
+              className="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-xs bg-slate-50 focus:outline-none focus:bg-white uppercase font-bold text-slate-700"
+            />
+            <datalist id="vehicles-archive-datalist">
+              {(settings?.vehiclesList || []).map((opt, i) => (
+                <option key={i} value={opt} />
+              ))}
+            </datalist>
+          </div>
+
+          {/* Supervisor Filter */}
+          <div className="space-y-1">
+            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block font-sans">Filter by Supervisor</label>
+            <select
+              value={supervisorFilter}
+              onChange={(e) => setSupervisorFilter(e.target.value)}
+              className="w-full px-3 py-1.5 border border-slate-200 rounded-lg text-xs bg-slate-50 focus:outline-none focus:bg-white cursor-pointer text-slate-700 font-medium"
+            >
+              <option value="">-- All Supervisors --</option>
+              {(settings?.suppliersList || []).map((opt, i) => (
+                <option key={i} value={opt}>{opt}</option>
+              ))}
+            </select>
+          </div>
+        </div>
       </div>
 
       {message && (
@@ -300,60 +310,40 @@ export const DispatchHistory: React.FC<DispatchHistoryProps> = ({ onEditDispatch
       {/* Dispatches List */}
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
-          {loading && dispatches.length === 0 ? (
+          {loading && filteredDispatches.length === 0 ? (
             <div className="py-12 text-center text-sm text-slate-400 font-medium">
               Loading dispatches...
             </div>
-          ) : dispatches.length === 0 ? (
+          ) : filteredDispatches.length === 0 ? (
             <div className="py-12 text-center text-sm text-slate-400 font-medium">
-              No matching dispatches found.
+              No matching completed dispatches found.
             </div>
           ) : (
             <table className="min-w-full divide-y divide-slate-200">
               <thead className="bg-slate-50">
                 <tr>
                   <th className="px-6 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">DC Number</th>
-                  <th className="px-6 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Date</th>
-                  <th className="px-6 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Status</th>
+                  <th className="px-6 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Date & Time</th>
                   <th className="px-6 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Vehicle No</th>
                   <th className="px-6 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Supervisor</th>
-                  <th className="px-6 py-3 text-right text-xs font-bold text-slate-500 uppercase tracking-wider w-24">Pallets</th>
+                  <th className="px-6 py-3 text-right text-xs font-bold text-slate-500 uppercase tracking-wider w-36">Total Pull Lists</th>
                   <th className="px-6 py-3 text-right text-xs font-bold text-slate-500 uppercase tracking-wider w-28">Total Parts</th>
-                  <th className="px-6 py-3 text-center text-xs font-bold text-slate-500 uppercase tracking-wider w-40">Actions</th>
+                  <th className="px-6 py-3 text-center text-xs font-bold text-slate-500 uppercase tracking-wider w-32">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 bg-white">
-                {dispatches.map((d) => (
+                {filteredDispatches.map((d) => (
                   <tr key={d.id} className="hover:bg-slate-50/50 transition-colors duration-100">
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-mono font-bold text-slate-800">
                       {d.dc_no}
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">
-                      <div className="flex items-center gap-1">
-                        <Calendar size={13} className="text-slate-400" />
-                        <span>{d.date}</span>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-600 font-medium">
+                      <div className="flex items-center gap-1.5">
+                        <Calendar size={13} className="text-slate-400 shrink-0" />
+                        <span>{formatDateTimeDisplay(d.date)}</span>
                       </div>
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-600 font-medium">
-                      <div className="flex items-center gap-2">
-                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold ${
-                          d.status === 'draft'
-                            ? 'bg-amber-50 text-amber-800 border border-amber-200'
-                            : 'bg-emerald-50 text-emerald-800 border border-emerald-200'
-                        }`}>
-                          {d.status === 'draft' ? 'Draft' : 'Completed'}
-                        </span>
-                        {d.status === 'draft' && (
-                          <button
-                            onClick={() => d.id && handleMarkCompleted(d)}
-                            className="px-2 py-1 text-[11px] font-bold rounded border border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 transition-colors cursor-pointer"
-                          >
-                            Mark Completed
-                          </button>
-                        )}
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-600 font-medium">
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-600 font-bold uppercase">
                       {d.vehicle_no}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-600 font-medium">
@@ -367,6 +357,7 @@ export const DispatchHistory: React.FC<DispatchHistoryProps> = ({ onEditDispatch
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-center text-sm font-medium">
                       <div className="flex items-center justify-center gap-2">
+                        {/* View Action */}
                         <button
                           onClick={() => d.id && handleViewDetails(d.id)}
                           title="View items"
@@ -374,20 +365,25 @@ export const DispatchHistory: React.FC<DispatchHistoryProps> = ({ onEditDispatch
                         >
                           <Eye size={15} />
                         </button>
+                        {/* Print Challan Action */}
                         <button
-                          onClick={() => d.id && handleAddSubjectClick(d.id)}
-                          title="Quick Add Subject"
-                          className="p-1 rounded text-indigo-600 hover:bg-indigo-50 hover:text-indigo-800 transition-colors duration-150 cursor-pointer"
+                          onClick={async () => {
+                            if (!d.id) return;
+                            try {
+                              const fullDisp = await databaseService.getDispatch(d.id);
+                              if (fullDisp) {
+                                await handleReprintChallan(fullDisp, fullDisp.items || []);
+                              }
+                            } catch (e) {
+                              console.error(e);
+                            }
+                          }}
+                          title="Print Challan PDF"
+                          className="p-1 rounded text-slate-600 hover:bg-slate-50 hover:text-slate-800 transition-colors duration-150 cursor-pointer"
                         >
-                          <Plus size={15} />
+                          <Printer size={15} />
                         </button>
-                        <button
-                          onClick={() => d.id && onEditDispatch(d.id)}
-                          title="Edit dispatch"
-                          className="p-1 rounded text-blue-600 hover:bg-blue-50 hover:text-blue-800 transition-colors duration-150 cursor-pointer"
-                        >
-                          <Edit3 size={15} />
-                        </button>
+                        {/* Delete Action */}
                         <button
                           onClick={() => d.id && handleDeleteConfirm(d.id)}
                           title="Delete dispatch"
@@ -428,12 +424,14 @@ export const DispatchHistory: React.FC<DispatchHistoryProps> = ({ onEditDispatch
               </div>
               <div>
                 <span className="text-slate-400 font-bold uppercase block mb-0.5">Status</span>
-                <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold ${
-                  selectedDispatch.status === 'draft'
-                    ? 'bg-amber-50 text-amber-800 border border-amber-200'
-                    : 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold border ${
+                  selectedDispatch.status === 'completed'
+                    ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                    : selectedDispatch.status === 'ready'
+                      ? 'bg-indigo-50 text-indigo-800 border-indigo-200'
+                      : 'bg-amber-50 text-amber-800 border-amber-200'
                 }`}>
-                  {selectedDispatch.status === 'draft' ? 'Draft' : 'Completed'}
+                  {selectedDispatch.status === 'completed' ? 'Completed' : selectedDispatch.status === 'ready' ? 'Ready' : 'Loading'}
                 </span>
               </div>
               <div>
@@ -541,46 +539,6 @@ export const DispatchHistory: React.FC<DispatchHistoryProps> = ({ onEditDispatch
             </button>
           </div>
         </div>
-      </Modal>
-
-      {/* Quick Add Subject Modal */}
-      <Modal
-        isOpen={subjectModalOpen}
-        onClose={() => setSubjectModalOpen(false)}
-        title="Quick Add Pull List via Email Subject"
-      >
-        <form onSubmit={handleAddSubjectSubmit} className="space-y-4">
-          <div className="space-y-1.5">
-            <label className="text-xs font-bold text-slate-500 uppercase tracking-wider block">Paste Email Subject Line</label>
-            <input
-              type="text"
-              placeholder="e.g. FW: 369118 M5444529010030B0 BoxBuild B26-MELLANOX 1"
-              value={subjectText}
-              onChange={(e) => setSubjectText(e.target.value)}
-              className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-slate-50 focus:outline-none focus:border-[#4BB8FA] focus:bg-white transition-colors"
-              required
-            />
-            {subjectError && (
-              <p className="text-xs text-rose-600 font-bold">{subjectError}</p>
-            )}
-          </div>
-
-          <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
-            <button
-              type="button"
-              onClick={() => setSubjectModalOpen(false)}
-              className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-semibold cursor-pointer"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="px-4 py-2 bg-[#4BB8FA] hover:bg-[#35a0dc] text-slate-900 rounded-lg text-xs font-bold cursor-pointer"
-            >
-              Add Item
-            </button>
-          </div>
-        </form>
       </Modal>
     </div>
   );

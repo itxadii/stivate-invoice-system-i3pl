@@ -9,14 +9,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
     saveDispatch: (dispatch: any, items: any[]) => ipcRenderer.invoke('db:saveDispatch', dispatch, items),
     deleteDispatch: (id: number) => ipcRenderer.invoke('db:deleteDispatch', id),
     getDispatch: (id: number) => ipcRenderer.invoke('db:getDispatch', id),
-    getAllDispatches: (limit?: number, offset?: number) => ipcRenderer.invoke('db:getAllDispatches', limit, offset),
-    searchDispatches: (query: string, limit?: number, offset?: number) => ipcRenderer.invoke('db:searchDispatches', query, limit, offset),
+    getAllDispatches: (status?: string | string[], limit?: number, offset?: number) => ipcRenderer.invoke('db:getAllDispatches', status, limit, offset),
+    searchDispatches: (query: string, status?: string | string[], limit?: number, offset?: number) => ipcRenderer.invoke('db:searchDispatches', query, status, limit, offset),
     searchPullList: (pullListNo: string) => ipcRenderer.invoke('db:searchPullList', pullListNo),
     importMasterData: (rows: any[]) => ipcRenderer.invoke('db:importMasterData', rows),
     getDashboardStats: () => ipcRenderer.invoke('db:getDashboardStats'),
     getTrendData: (range: string) => ipcRenderer.invoke('db:getTrendData', range),
-    getReports: (type: string, startDate?: string, endDate?: string) => 
-      ipcRenderer.invoke('db:getReports', type, startDate, endDate),
+    getReports: (type: string, startDate?: string, endDate?: string, destination?: string) => 
+      ipcRenderer.invoke('db:getReports', type, startDate, endDate, destination),
+    getPipelineStats: () => ipcRenderer.invoke('db:getPipelineStats'),
   },
   backup: {
     triggerBackup: () => ipcRenderer.invoke('backup:trigger'),
@@ -32,5 +33,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     download: () => ipcRenderer.invoke('updater:download'),
     install: () => ipcRenderer.invoke('updater:install'),
     getVersion: () => ipcRenderer.invoke('updater:getVersion'),
+    onStatus: (callback: (value: any) => void) => {
+      const subscription = (_event: any, value: any) => callback(value);
+      ipcRenderer.on('updater:status', subscription);
+      return () => {
+        ipcRenderer.removeListener('updater:status', subscription);
+      };
+    }
   }
 });

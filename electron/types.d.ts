@@ -9,13 +9,14 @@ interface ElectronAPI {
     saveDispatch: (dispatch: any, items: any[]) => Promise<any>;
     deleteDispatch: (id: number) => Promise<boolean>;
     getDispatch: (id: number) => Promise<any>;
-    getAllDispatches: (limit?: number, offset?: number) => Promise<any[]>;
-    searchDispatches: (query: string, limit?: number, offset?: number) => Promise<any[]>;
+    getAllDispatches: (status?: string | string[], limit?: number, offset?: number) => Promise<any[]>;
+    searchDispatches: (query: string, status?: string | string[], limit?: number, offset?: number) => Promise<any[]>;
     searchPullList: (pullListNo: string) => Promise<any>;
     importMasterData: (rows: any[]) => Promise<boolean>;
     getDashboardStats: () => Promise<any>;
     getTrendData: (range: string) => Promise<any[]>;
-    getReports: (type: string, startDate?: string, endDate?: string) => Promise<any>;
+    getReports: (type: string, startDate?: string, endDate?: string, destination?: string) => Promise<any>;
+    getPipelineStats: () => Promise<any>;
   };
   backup: {
     triggerBackup: () => Promise<{ success: boolean; message: string }>;

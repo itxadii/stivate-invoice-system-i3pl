@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { databaseService, printService, settingsService } from '../services/ipc';
 import type { Dispatch, DispatchItem, AppSettings } from '../types';
 import { DispatchTable } from '../components/DispatchTable';
-import { Printer, Save, ArrowLeft, AlertCircle } from 'lucide-react';
+import { ArrowLeft, AlertCircle, Play, CheckCircle, Barcode, FileText, Printer, Sliders } from 'lucide-react';
 import { Modal } from '../components/Modal';
 
 interface NewDispatchProps {
@@ -12,6 +12,40 @@ interface NewDispatchProps {
   previousTab?: string;
 }
 
+const getNowDateTimeString = () => {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  const hours = String(now.getHours()).padStart(2, '0');
+  const minutes = String(now.getMinutes()).padStart(2, '0');
+  return `${year}-${month}-${day}T${hours}:${minutes}`;
+};
+
+const formatForDateTimeInput = (val?: string) => {
+  if (!val) return getNowDateTimeString();
+  if (val.includes('T')) return val.substring(0, 16);
+  if (val.includes(' ')) return val.replace(' ', 'T').substring(0, 16);
+  return `${val}T00:00`;
+};
+
+const formatDateTimeDisplay = (dateStr: string) => {
+  if (!dateStr) return '';
+  try {
+    const norm = dateStr.includes('T') ? dateStr : dateStr.replace(' ', 'T');
+    const dObj = new Date(norm);
+    if (!isNaN(dObj.getTime())) {
+      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      let hours = dObj.getHours();
+      const ampm = hours >= 12 ? 'PM' : 'AM';
+      hours = hours % 12 || 12;
+      const mins = String(dObj.getMinutes()).padStart(2, '0');
+      return `${dObj.getDate()}-${months[dObj.getMonth()]}-${dObj.getFullYear().toString().slice(-2)} ${String(hours).padStart(2, '0')}:${mins} ${ampm}`;
+    }
+  } catch (e) {}
+  return dateStr;
+};
+
 export const NewDispatch: React.FC<NewDispatchProps> = ({
   editId = null,
   onClearEditId,
@@ -20,7 +54,7 @@ export const NewDispatch: React.FC<NewDispatchProps> = ({
 }) => {
   const [dispatch, setDispatch] = useState<Partial<Dispatch>>({
     dc_no: '',
-    date: new Date().toISOString().split('T')[0],
+    date: getNowDateTimeString(),
     vehicle_no: '',
     supplier_name: '',
     address: 'AS PER LIST',
@@ -31,7 +65,7 @@ export const NewDispatch: React.FC<NewDispatchProps> = ({
     verify_by: '',
     transaction_type: '',
     created_by: 'Operator',
-    status: 'draft',
+    status: 'loading',
   });
 
   const [settings, setSettings] = useState<AppSettings | null>(null);
@@ -39,9 +73,12 @@ export const NewDispatch: React.FC<NewDispatchProps> = ({
   const [pullListInput, setPullListInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [saveStatus, setSaveStatus] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+  const [confirmCompleteOpen, setConfirmCompleteOpen] = useState(false);
 
   // Manual Entry Modal for unknown pull lists
   const [manualModalOpen, setManualModalOpen] = useState(false);
+  const [showLogistics, setShowLogistics] = useState(false);
+  const [isManualPending, setIsManualPending] = useState(false);
   const [manualError, setManualError] = useState<string | null>(null);
   const [manualItem, setManualItem] = useState<Partial<DispatchItem>>({
     pull_list_no: '',
@@ -52,6 +89,27 @@ export const NewDispatch: React.FC<NewDispatchProps> = ({
   });
 
   const scanInputRef = useRef<HTMLInputElement>(null);
+
+  // Ref to hold the latest dispatch and items state for unmount autosave
+  const latestStateRef = useRef({ dispatch, items });
+  useEffect(() => {
+    latestStateRef.current = { dispatch, items };
+  }, [dispatch, items]);
+
+  useEffect(() => {
+    return () => {
+      const { dispatch: d, items: its } = latestStateRef.current;
+      // Do not overwrite completed dispatches during unmount
+      if (d.status === 'completed') {
+        return;
+      }
+      if (d.vehicle_no && d.supplier_name) {
+        const updatedTotalPallets = Math.max(d.total_pallets || 1, its.length);
+        const dispatchToSave = { ...d, total_pallets: updatedTotalPallets };
+        void databaseService.saveDispatch(dispatchToSave, its);
+      }
+    };
+  }, []);
 
   // Load existing dispatch for edit and settings for defaults
   useEffect(() => {
@@ -78,7 +136,7 @@ export const NewDispatch: React.FC<NewDispatchProps> = ({
               scanning_by: data.scanning_by || '',
               verify_by: data.verify_by || '',
               transaction_type: data.transaction_type || '',
-              status: data.status || 'draft',
+              status: (data.status as any) === 'draft' || !data.status ? 'loading' : data.status,
             });
             setItems(data.items || []);
           }
@@ -138,8 +196,9 @@ export const NewDispatch: React.FC<NewDispatchProps> = ({
 
       // Verify basic patterns: ID should be digits, Pull List is alphanumeric (allowing hyphens/underscores)
       if (/^\d+$/.test(idNumber) && /^[A-Z0-9_-]+$/i.test(pullListNo)) {
-        // Check if duplicate in current list
-        if (items.some(item => item.pull_list_no.toLowerCase() === pullListNo.toLowerCase())) {
+        // Check if duplicate in current list (loaded or pending)
+        const cleanNo = pullListNo.toUpperCase();
+        if (items.some(item => item.pull_list_no.replace(/_pending$/, '').toUpperCase() === cleanNo)) {
           setSaveStatus({ text: `Pull List ${pullListNo} already added.`, type: 'error' });
           setPullListInput('');
           setTimeout(() => setSaveStatus(null), 3000);
@@ -147,7 +206,7 @@ export const NewDispatch: React.FC<NewDispatchProps> = ({
         }
 
         const newItem: DispatchItem = {
-          pull_list_no: pullListNo,
+          pull_list_no: `${cleanNo}_pending`, // starts as pending since it was pasted/typed in bulk!
           id_number: idNumber,
           kit_type: kitType,
           workcell: workcell,
@@ -160,7 +219,10 @@ export const NewDispatch: React.FC<NewDispatchProps> = ({
 
         // Auto-cache to master database in background so it can be searched
         try {
-          databaseService.importMasterData([newItem]);
+          databaseService.importMasterData([{
+            ...newItem,
+            pull_list_no: cleanNo
+          }]);
         } catch (err) {
           console.error('Failed to auto-cache master:', err);
         }
@@ -170,45 +232,9 @@ export const NewDispatch: React.FC<NewDispatchProps> = ({
 
     // 2. Check if it's a single Pull List Number
     if (parts.length === 1 && /^[A-Z0-9_-]+$/i.test(cleanText)) {
-      const pullListNo = cleanText;
-      if (items.some(item => item.pull_list_no.toLowerCase() === pullListNo.toLowerCase())) {
-        setSaveStatus({ text: `Pull List ${pullListNo} already added.`, type: 'error' });
-        setPullListInput('');
-        setTimeout(() => setSaveStatus(null), 3000);
-        return;
-      }
-
-      try {
-        const masterItem = await databaseService.searchPullList(pullListNo);
-        if (masterItem) {
-          const newItem: DispatchItem = {
-            pull_list_no: masterItem.pull_list_no,
-            id_number: masterItem.id_number || '',
-            kit_type: masterItem.kit_type || '',
-            workcell: masterItem.workcell || '',
-            parts: masterItem.parts || 1
-          };
-          setItems((prev) => [newItem, ...prev]);
-          setPullListInput('');
-          setSaveStatus(null);
-          return;
-        } else {
-          // Prefill manual item and open modal
-          setManualItem({
-            pull_list_no: pullListNo,
-            id_number: '',
-            kit_type: '',
-            workcell: '',
-            parts: 1
-          });
-          setManualModalOpen(true);
-          setPullListInput('');
-          setSaveStatus(null);
-          return;
-        }
-      } catch (err) {
-        console.error('Failed to query database:', err);
-      }
+      setPullListInput('');
+      await handleMarkIndividualLoaded(cleanText);
+      return;
     }
 
     setSaveStatus({
@@ -219,6 +245,58 @@ export const NewDispatch: React.FC<NewDispatchProps> = ({
     setTimeout(() => setSaveStatus(null), 5000);
   };
 
+  const handleMarkIndividualLoaded = async (pullListNo: string) => {
+    const cleanText = pullListNo.replace(/\s+/g, ' ').trim().toUpperCase();
+    if (!cleanText) return;
+
+    // Check if it already exists as loaded in items list (no _pending suffix)
+    const alreadyLoaded = items.some(item => item.pull_list_no === cleanText);
+    if (alreadyLoaded) {
+      setSaveStatus({ text: `Pull List ${cleanText} already loaded.`, type: 'error' });
+      setTimeout(() => setSaveStatus(null), 3000);
+      return;
+    }
+
+    // Check if it already exists as pending in items list (ends with _pending)
+    const pendingIdx = items.findIndex(item => item.pull_list_no === `${cleanText}_pending`);
+    if (pendingIdx !== -1) {
+      // Promote it to loaded (strip _pending suffix)
+      handleConfirmLoad(pendingIdx);
+      setSaveStatus({ text: `Pull List ${cleanText} loaded successfully.`, type: 'success' });
+      setTimeout(() => setSaveStatus(null), 3000);
+      return;
+    }
+
+    try {
+      const masterItem = await databaseService.searchPullList(cleanText);
+      if (masterItem) {
+        const newItem: DispatchItem = {
+          pull_list_no: masterItem.pull_list_no,
+          id_number: masterItem.id_number || '',
+          kit_type: masterItem.kit_type || '',
+          workcell: masterItem.workcell || '',
+          parts: masterItem.parts || 1
+        };
+        setItems((prev) => [newItem, ...prev]);
+        setSaveStatus({ text: `Pull List ${cleanText} marked loaded successfully.`, type: 'success' });
+        setTimeout(() => setSaveStatus(null), 3000);
+      } else {
+        // Prefill manual item and open modal
+        setIsManualPending(false);
+        setManualItem({
+          pull_list_no: cleanText,
+          id_number: '',
+          kit_type: '',
+          workcell: '',
+          parts: 1
+        });
+        setManualModalOpen(true);
+      }
+    } catch (err) {
+      console.error('Failed to query database:', err);
+    }
+  };
+
   const handleManualItemSave = (e: React.FormEvent) => {
     e.preventDefault();
     if (!manualItem.pull_list_no) {
@@ -226,8 +304,11 @@ export const NewDispatch: React.FC<NewDispatchProps> = ({
       return;
     }
 
+    const cleanNo = manualItem.pull_list_no.trim().toUpperCase();
+    const resolvedPullListNo = isManualPending ? `${cleanNo}_pending` : cleanNo;
+
     const newItem: DispatchItem = {
-      pull_list_no: manualItem.pull_list_no.trim(),
+      pull_list_no: resolvedPullListNo,
       id_number: (manualItem.id_number || '').trim(),
       kit_type: (manualItem.kit_type || '').trim(),
       workcell: (manualItem.workcell || '').trim(),
@@ -239,9 +320,12 @@ export const NewDispatch: React.FC<NewDispatchProps> = ({
     setManualError(null);
     setPullListInput('');
 
-    // Ask to add to master database so future scans auto-fill
+    // Ask to add to master database (strip _pending suffix so master has clean pull list)
     try {
-      databaseService.importMasterData([newItem]);
+      databaseService.importMasterData([{
+        ...newItem,
+        pull_list_no: cleanNo
+      }]);
     } catch (err) {
       console.error('Failed to auto-cache to master data:', err);
     }
@@ -255,12 +339,27 @@ export const NewDispatch: React.FC<NewDispatchProps> = ({
       workcell: '',
       parts: 1
     });
+    setIsManualPending(true);
     setManualError(null);
     setManualModalOpen(true);
   };
 
   const handleRemoveItem = (idx: number) => {
     setItems((prev) => prev.filter((_, i) => i !== idx));
+  };
+
+  const handleConfirmLoad = (idx: number) => {
+    setItems((prev) => {
+      const next = [...prev];
+      const targetItem = next[idx];
+      if (targetItem && targetItem.pull_list_no.endsWith('_pending')) {
+        next[idx] = {
+          ...targetItem,
+          pull_list_no: targetItem.pull_list_no.replace(/_pending$/, '')
+        };
+      }
+      return next;
+    });
   };
 
   const handleDispatchChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
@@ -276,18 +375,24 @@ export const NewDispatch: React.FC<NewDispatchProps> = ({
       setSaveStatus({ text: 'Please fill in VEHICLE NO and SUP NAME.', type: 'error' });
       return null;
     }
-    if (items.length === 0) {
-      setSaveStatus({ text: 'Please add at least one Pull List item.', type: 'error' });
-      return null;
-    }
+
 
     setLoading(true);
     setSaveStatus(null);
     try {
-      const res = await databaseService.saveDispatch(dispatch, items);
+      const updatedTotalPallets = Math.max(dispatch.total_pallets || 1, items.length);
+      const dispatchToSave = { ...dispatch, total_pallets: updatedTotalPallets };
+      const res = await databaseService.saveDispatch(dispatchToSave, items);
       if (res && res.id) {
-        setDispatch((prev) => ({ ...prev, id: res.id, dc_no: res.dc_no }));
+        setDispatch((prev) => ({ ...prev, id: res.id, dc_no: res.dc_no, total_pallets: updatedTotalPallets }));
         setSaveStatus({ text: `Dispatch ${res.dc_no} saved successfully!`, type: 'success' });
+        
+        // Redirect to active pipeline if this is a newly created dispatch
+        if (!editId) {
+          setTimeout(() => {
+            setActiveTab('pipeline');
+          }, 1000);
+        }
         return res;
       }
       return null;
@@ -324,26 +429,100 @@ export const NewDispatch: React.FC<NewDispatchProps> = ({
     }
   };
 
-  const handleReset = () => {
-    setDispatch({
-      dc_no: '',
-      date: new Date().toISOString().split('T')[0],
-      vehicle_no: settings?.defaultVehicleNo || '',
-      supplier_name: settings?.defaultSupplier || '',
-      address: settings?.defaultAddress || 'AS PER LIST',
-      total_pallets: 1,
-      total_parts: 0,
-      particular: 'AS PER LIST',
-      scanning_by: settings?.defaultScanner || '',
-      verify_by: settings?.defaultVerifier || '',
-      transaction_type: '',
-      created_by: 'Operator',
-      status: 'draft',
-    });
-    setItems([]);
-    setPullListInput('');
+  const handlePrintBarcodes = async () => {
+    if (items.length === 0) {
+      setSaveStatus({ text: 'No items to print barcodes.', type: 'error' });
+      return;
+    }
+    try {
+      setLoading(true);
+      await printService.printBarcodes(items);
+      setSaveStatus({ text: 'Barcode print command sent successfully.', type: 'success' });
+    } catch (err) {
+      setSaveStatus({ text: 'Failed to print barcodes.', type: 'error' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handlePrintChallan = async () => {
+    if (!dispatch.dc_no) {
+      setSaveStatus({ text: 'Please save the dispatch first before printing the challan.', type: 'error' });
+      return;
+    }
+    try {
+      setLoading(true);
+      await printService.printChallan(dispatch as Dispatch, items);
+      setSaveStatus({ text: 'Challan PDF print command sent successfully.', type: 'success' });
+    } catch (err) {
+      setSaveStatus({ text: 'Failed to print Challan PDF.', type: 'error' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleMarkReady = async () => {
+    if (!dispatch.vehicle_no || !dispatch.supplier_name) {
+      setSaveStatus({ text: 'Please fill in VEHICLE NO and SUP NAME.', type: 'error' });
+      return;
+    }
+    setLoading(true);
     setSaveStatus(null);
-    if (onClearEditId) onClearEditId();
+    try {
+      const updatedTotalPallets = Math.max(dispatch.total_pallets || 1, items.length);
+      const updatedDispatch = { ...dispatch, status: 'ready' as const, total_pallets: updatedTotalPallets };
+      const res = await databaseService.saveDispatch(updatedDispatch, items);
+      if (res && res.id) {
+        setDispatch((prev) => ({ ...prev, status: 'ready', total_pallets: updatedTotalPallets }));
+        setSaveStatus({ text: 'Dispatch marked as READY. Waiting for complete confirmation.', type: 'success' });
+      }
+    } catch (err: any) {
+      setSaveStatus({ text: `Failed to mark ready: ${err.message || err}`, type: 'error' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCompleteDispatch = async () => {
+    if (!dispatch.id) return;
+
+    const expected = dispatch.total_pallets || 1;
+    const loadedCount = items.filter(item => !item.pull_list_no.endsWith('_pending')).length;
+    const hasPending = items.some(item => item.pull_list_no.endsWith('_pending'));
+
+    if (hasPending || loadedCount < expected || items.length === 0) {
+      setSaveStatus({
+        text: `Cannot complete dispatch: Not all pull lists are loaded (${loadedCount} of ${expected} loaded). Please scan or load all pending slots first.`,
+        type: 'error'
+      });
+      setConfirmCompleteOpen(false);
+      return;
+    }
+
+    setLoading(true);
+    setSaveStatus(null);
+    setConfirmCompleteOpen(false);
+    try {
+      const completionTimestamp = getNowDateTimeString();
+      const updatedDispatch = { 
+        ...dispatch, 
+        status: 'completed' as const,
+        date: completionTimestamp
+      };
+      const res = await databaseService.saveDispatch(updatedDispatch, items);
+      if (res && res.id) {
+        setDispatch(updatedDispatch);
+        setSaveStatus({ text: `Dispatch ${dispatch.dc_no} completed successfully and archived at ${formatDateTimeDisplay(completionTimestamp)}!`, type: 'success' });
+        setTimeout(() => {
+          if (onClearEditId) onClearEditId();
+          setActiveTab('pipeline');
+        }, 1000);
+      }
+    } catch (err: any) {
+      setSaveStatus({ text: `Failed to complete dispatch: ${err.message || err}`, type: 'error' });
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleCancel = () => {
@@ -373,12 +552,6 @@ export const NewDispatch: React.FC<NewDispatchProps> = ({
           void handlePrintCombinedDispatch();
           return;
         }
-        if (e.key.toLowerCase() === 'n') {
-          e.preventDefault();
-          e.stopPropagation();
-          handleReset();
-          return;
-        }
       }
     };
     document.addEventListener('keydown', handleShortcuts, true);
@@ -400,7 +573,7 @@ export const NewDispatch: React.FC<NewDispatchProps> = ({
           )}
           <div>
             <h3 className="text-md font-bold text-slate-800 uppercase tracking-wide">
-              {editId ? `Editing Dispatch: ${dispatch.dc_no}` : 'New Dispatch Invoice'}
+              {editId ? `Loading Dispatch: ${dispatch.dc_no}` : 'New Dispatch Invoice'}
             </h3>
             <p className="text-xs text-slate-400">Enter or paste Pull List Numbers or Email Subject lines</p>
           </div>
@@ -408,21 +581,62 @@ export const NewDispatch: React.FC<NewDispatchProps> = ({
 
         {/* Action Controls */}
         <div className="flex items-center gap-2">
+
+
+          {/* Unified Print Set Button */}
           <button
             onClick={handlePrintCombinedDispatch}
-            className="flex items-center gap-1.5 px-3 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg text-xs font-bold cursor-pointer transition-colors"
+            disabled={loading || items.length === 0}
+            className="flex items-center gap-1.5 px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold cursor-pointer transition-colors disabled:opacity-50"
+            title="Prints 3 copies of Challan and 3 copies of Barcodes (Total 6 pages) in 1 click"
           >
             <Printer size={14} />
-            <span>Print Set (3 Copies, Ctrl+P)</span>
+            <span>Print Set (3x Challan + 3x Barcodes)</span>
           </button>
+
+          {/* Print Barcodes Button */}
           <button
-            onClick={handleSave}
-            disabled={loading}
-            className="flex items-center gap-1.5 px-4 py-2 bg-[#4BB8FA] hover:bg-[#35a0dc] text-slate-900 rounded-lg text-xs font-bold cursor-pointer transition-colors disabled:bg-slate-200 disabled:text-slate-400"
+            onClick={handlePrintBarcodes}
+            disabled={loading || items.length === 0}
+            className="flex items-center gap-1.5 px-3 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg text-xs font-bold cursor-pointer transition-colors disabled:opacity-50"
           >
-            <Save size={14} />
-            <span>{loading ? 'Saving...' : 'Save (Ctrl+S)'}</span>
+            <Barcode size={14} />
+            <span>Print Barcodes</span>
           </button>
+
+          {/* Print Challan Button */}
+          <button
+            onClick={handlePrintChallan}
+            disabled={loading || !dispatch.dc_no}
+            className="flex items-center gap-1.5 px-3 py-2 bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-lg text-xs font-bold cursor-pointer transition-colors disabled:opacity-50"
+          >
+            <FileText size={14} />
+            <span>Print Challan</span>
+          </button>
+
+          {/* Mark Ready Action (if status is loading) */}
+          {dispatch.id && dispatch.status === 'loading' && (
+            <button
+              onClick={handleMarkReady}
+              disabled={loading}
+              className="flex items-center gap-1.5 px-3 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-xs font-bold cursor-pointer transition-colors disabled:opacity-50"
+            >
+              <Play size={14} />
+              <span>Mark Ready</span>
+            </button>
+          )}
+
+          {/* Complete Dispatch Action (if status is ready) */}
+          {dispatch.id && dispatch.status === 'ready' && (
+            <button
+              onClick={() => setConfirmCompleteOpen(true)}
+              disabled={loading}
+              className="flex items-center gap-1.5 px-3 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold cursor-pointer transition-colors disabled:opacity-50"
+            >
+              <CheckCircle size={14} />
+              <span>Complete Dispatch</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -437,170 +651,180 @@ export const NewDispatch: React.FC<NewDispatchProps> = ({
       )}
 
       {/* Main Form Fields Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Left Side: Dispatch Metadata */}
-        <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-4">
-          <h4 className="text-xs font-extrabold text-slate-400 uppercase tracking-wider">Dispatch Logistics</h4>
-          
-          <div className="space-y-4">
-            <div className="space-y-1">
-              <label className="text-xs font-bold text-slate-500 uppercase">DC NO (Auto)</label>
-              <input
-                type="text"
-                value={dispatch.dc_no || 'Draft (Auto generated)'}
-                disabled
-                className="w-full px-3 py-2 border border-slate-200 bg-slate-50 rounded-lg text-sm font-mono text-slate-500 font-semibold"
-              />
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-xs font-bold text-slate-500 uppercase">DATE</label>
-              <input
-                type="date"
-                name="date"
-                value={dispatch.date}
-                onChange={handleDispatchChange}
-                required
-                className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-slate-50 focus:outline-none focus:border-emerald-500 focus:bg-white transition-colors"
-              />
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-xs font-bold text-slate-500 uppercase">Status</label>
-              <select
-                name="status"
-                value={dispatch.status || 'draft'}
-                onChange={handleDispatchChange}
-                required
-                className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-slate-50 focus:outline-none focus:border-emerald-500 focus:bg-white transition-colors text-slate-700 font-medium cursor-pointer"
-              >
-                <option value="draft">Draft</option>
-                <option value="completed">Completed</option>
-              </select>
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-xs font-bold text-slate-500 uppercase">Supervisor Name</label>
-              <select
-                name="supplier_name"
-                value={dispatch.supplier_name}
-                onChange={handleDispatchChange}
-                required
-                className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-slate-50 focus:outline-none focus:border-emerald-500 focus:bg-white transition-colors font-medium text-slate-700 cursor-pointer"
-              >
-                <option value="">-- Select Supervisor --</option>
-                {(settings?.suppliersList || []).map((opt, i) => (
-                  <option key={i} value={opt}>{opt}</option>
-                ))}
-              </select>
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-xs font-bold text-slate-500 uppercase">VEHICLE NO</label>
-              <input
-                type="text"
-                name="vehicle_no"
-                placeholder="e.g. MH-12-QW-1234"
-                list="vehicles-datalist"
-                value={dispatch.vehicle_no}
-                onChange={handleDispatchChange}
-                required
-                className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-slate-50 focus:outline-none focus:border-emerald-500 focus:bg-white transition-colors uppercase font-semibold text-slate-700"
-              />
-              <datalist id="vehicles-datalist">
-                {(settings?.vehiclesList || []).map((opt, i) => (
-                  <option key={i} value={opt} />
-                ))}
-              </datalist>
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-xs font-bold text-slate-500 uppercase">Address / Consignee</label>
-              <select
-                name="address"
-                value={dispatch.address}
-                onChange={handleDispatchChange}
-                required
-                className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-slate-50 focus:outline-none focus:border-emerald-500 focus:bg-white transition-colors text-slate-700 font-medium cursor-pointer"
-              >
-                <option value="">-- Select Consignee Address --</option>
-                {(settings?.addressesList || []).map((opt, i) => (
-                  <option key={i} value={opt}>{opt.split('\n')[0]}</option>
-                ))}
-              </select>
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-xs font-bold text-slate-500 uppercase">PERTICULAR</label>
-              <input
-                type="text"
-                name="particular"
-                placeholder="e.g. AS PER LIST"
-                value={dispatch.particular}
-                onChange={handleDispatchChange}
-                className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-slate-50 focus:outline-none focus:border-emerald-500 focus:bg-white transition-colors text-slate-700 font-medium"
-              />
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-xs font-bold text-slate-500 uppercase">SCANNING BY</label>
-              <select
-                name="scanning_by"
-                value={dispatch.scanning_by}
-                onChange={handleDispatchChange}
-                className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-slate-50 focus:outline-none focus:border-emerald-500 focus:bg-white transition-colors text-slate-700 cursor-pointer"
-              >
-                <option value="">-- Select Operator --</option>
-                {(settings?.scannersList || []).map((opt, i) => (
-                  <option key={i} value={opt}>{opt}</option>
-                ))}
-              </select>
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-xs font-bold text-slate-500 uppercase">VERIFY BY</label>
-              <select
-                name="verify_by"
-                value={dispatch.verify_by}
-                onChange={handleDispatchChange}
-                className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-slate-50 focus:outline-none focus:border-emerald-500 focus:bg-white transition-colors text-slate-700 font-medium cursor-pointer"
-              >
-                <option value="">-- Select Verifier --</option>
-                {(settings?.verifiersList || []).map((opt, i) => (
-                  <option key={i} value={opt}>{opt}</option>
-                ))}
-              </select>
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-xs font-bold text-slate-500 uppercase">TRANSACTION</label>
-              <input
-                type="text"
-                name="transaction_type"
-                placeholder="Transaction details"
-                value={dispatch.transaction_type}
-                onChange={handleDispatchChange}
-                className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-slate-50 focus:outline-none focus:border-emerald-500 focus:bg-white transition-colors text-slate-700"
-              />
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-xs font-bold text-slate-500 uppercase">Total Pallets Count</label>
-              <input
-                type="number"
-                name="total_pallets"
-                value={dispatch.total_pallets}
-                onChange={handleDispatchChange}
-                min={1}
-                required
-                className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-slate-50 focus:outline-none focus:border-emerald-500 focus:bg-white transition-colors font-mono font-bold text-slate-700"
-              />
-            </div>
-          </div>
+      <div className="flex gap-6 items-start">
+        {/* Left Toggle Sidebar Trigger */}
+        <div className="flex flex-col gap-2 items-center bg-white p-2.5 rounded-xl border border-slate-200 shadow-sm shrink-0">
+          <button
+            type="button"
+            onClick={() => setShowLogistics(!showLogistics)}
+            className={`p-2 rounded-lg transition-all cursor-pointer border ${
+              showLogistics
+                ? 'bg-[#4BB8FA]/10 text-[#4BB8FA] border-[#4BB8FA]/20'
+                : 'bg-white hover:bg-slate-50 border-slate-200 text-slate-500 hover:text-slate-700'
+            }`}
+            title="Toggle Dispatch Logistics Panel"
+          >
+            <Sliders size={18} />
+          </button>
         </div>
 
-        {/* Right Side: Scan barcodes & Table items */}
-        <div className="lg:col-span-2 bg-white p-6 rounded-xl border border-slate-200 shadow-sm flex flex-col space-y-4">
+        {/* Dynamic Grid Layout */}
+        <div className={`flex-1 grid grid-cols-1 gap-6 ${showLogistics ? 'lg:grid-cols-3' : 'lg:grid-cols-2'}`}>
+          {/* Left Side: Dispatch Metadata */}
+          {showLogistics && (
+            <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-4">
+              <h4 className="text-xs font-extrabold text-slate-400 uppercase tracking-wider">Dispatch Logistics</h4>
+              
+              <div className="space-y-4">
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-500 uppercase">DC NO (Auto)</label>
+                  <input
+                    type="text"
+                    value={dispatch.dc_no || 'Draft (Auto generated)'}
+                    disabled
+                    className="w-full px-3 py-2 border border-slate-200 bg-slate-50 rounded-lg text-sm font-mono text-slate-500 font-semibold"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-500 uppercase">DATE & TIME</label>
+                  <input
+                    type="datetime-local"
+                    name="date"
+                    value={formatForDateTimeInput(dispatch.date)}
+                    onChange={handleDispatchChange}
+                    required
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-slate-50 focus:outline-none focus:border-emerald-500 focus:bg-white transition-colors font-medium text-slate-700"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-500 uppercase">Supervisor Name</label>
+                  <select
+                    name="supplier_name"
+                    value={dispatch.supplier_name}
+                    onChange={handleDispatchChange}
+                    required
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-slate-50 focus:outline-none focus:border-emerald-500 focus:bg-white transition-colors font-medium text-slate-700 cursor-pointer"
+                  >
+                    <option value="">-- Select Supervisor --</option>
+                    {(settings?.suppliersList || []).map((opt, i) => (
+                      <option key={i} value={opt}>{opt}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-500 uppercase">VEHICLE NO</label>
+                  <input
+                    type="text"
+                    name="vehicle_no"
+                    placeholder="e.g. MH-12-QW-1234"
+                    list="vehicles-datalist"
+                    value={dispatch.vehicle_no}
+                    onChange={handleDispatchChange}
+                    required
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-slate-50 focus:outline-none focus:border-emerald-500 focus:bg-white transition-colors uppercase font-semibold text-slate-700"
+                  />
+                  <datalist id="vehicles-datalist">
+                    {(settings?.vehiclesList || []).map((opt, i) => (
+                      <option key={i} value={opt} />
+                    ))}
+                  </datalist>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-500 uppercase">Address / Consignee</label>
+                  <select
+                    name="address"
+                    value={dispatch.address}
+                    onChange={handleDispatchChange}
+                    required
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-slate-50 focus:outline-none focus:border-emerald-500 focus:bg-white transition-colors text-slate-700 font-medium cursor-pointer"
+                  >
+                    <option value="">-- Select Consignee Address --</option>
+                    {(settings?.addressesList || []).map((opt, i) => (
+                      <option key={i} value={opt}>{opt.split('\n')[0]}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-500 uppercase">PERTICULAR</label>
+                  <input
+                    type="text"
+                    name="particular"
+                    placeholder="e.g. AS PER LIST"
+                    value={dispatch.particular}
+                    onChange={handleDispatchChange}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-slate-50 focus:outline-none focus:border-emerald-500 focus:bg-white transition-colors text-slate-700 font-medium"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-500 uppercase">SCANNING BY</label>
+                  <select
+                    name="scanning_by"
+                    value={dispatch.scanning_by}
+                    onChange={handleDispatchChange}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-slate-50 focus:outline-none focus:border-emerald-500 focus:bg-white transition-colors text-slate-700 cursor-pointer"
+                  >
+                    <option value="">-- Select Operator --</option>
+                    {(settings?.scannersList || []).map((opt, i) => (
+                      <option key={i} value={opt}>{opt}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-500 uppercase">VERIFY BY</label>
+                  <select
+                    name="verify_by"
+                    value={dispatch.verify_by}
+                    onChange={handleDispatchChange}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-slate-50 focus:outline-none focus:border-emerald-500 focus:bg-white transition-colors text-slate-700 font-medium cursor-pointer"
+                  >
+                    <option value="">-- Select Verifier --</option>
+                    {(settings?.verifiersList || []).map((opt, i) => (
+                      <option key={i} value={opt}>{opt}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-500 uppercase">TRANSACTION</label>
+                  <input
+                    type="text"
+                    name="transaction_type"
+                    placeholder="Transaction details"
+                    value={dispatch.transaction_type}
+                    onChange={handleDispatchChange}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-slate-50 focus:outline-none focus:border-emerald-500 focus:bg-white transition-colors text-slate-700"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-500 uppercase">Total Pallets Count</label>
+                  <input
+                    type="number"
+                    name="total_pallets"
+                    value={dispatch.total_pallets}
+                    onChange={handleDispatchChange}
+                    min={1}
+                    required
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-slate-50 focus:outline-none focus:border-emerald-500 focus:bg-white transition-colors font-mono font-bold text-slate-700"
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Right Side: Scan barcodes & Table items */}
+          <div className={`${
+            dispatch.id && (dispatch.status === 'loading' || dispatch.status === 'ready')
+              ? 'lg:col-span-1'
+              : 'lg:col-span-2'
+          } bg-white p-6 rounded-xl border border-slate-200 shadow-sm flex flex-col space-y-4`}>
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <h4 className="text-xs font-extrabold text-slate-400 uppercase tracking-wider">Dispatch Items</h4>
             
@@ -640,16 +864,155 @@ export const NewDispatch: React.FC<NewDispatchProps> = ({
               type="submit"
               className="px-4 py-3 bg-[#4BB8FA] text-slate-900 rounded-lg text-sm font-bold hover:bg-[#35a0dc] cursor-pointer whitespace-nowrap flex-shrink-0"
             >
-              Add Pull List
+              Mark Loaded
             </button>
           </form>
 
-          {/* Items Table */}
           <div className="flex-1 overflow-y-auto max-h-90">
             <DispatchTable items={items} onRemoveItem={handleRemoveItem} />
           </div>
         </div>
+
+        {/* Third Column: Loading Checklist (Only shown in active pipeline edit mode) */}
+        {dispatch.id && (dispatch.status === 'loading' || dispatch.status === 'ready') && (
+          <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm flex flex-col space-y-4">
+            <h4 className="text-xs font-extrabold text-slate-400 uppercase tracking-wider">Loading Checklist</h4>
+            
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-2 text-xs border-b border-slate-100 pb-3">
+                <div>
+                  <span className="text-slate-400 font-bold uppercase block">Vehicle</span>
+                  <span className="font-semibold text-slate-700 uppercase">{dispatch.vehicle_no}</span>
+                </div>
+                <div>
+                  <span className="text-slate-400 font-bold uppercase block">Supervisor</span>
+                  <span className="font-semibold text-slate-700">{dispatch.supplier_name}</span>
+                </div>
+                <div className="pt-2 col-span-2">
+                  <span className="text-slate-400 font-bold uppercase block">Created At</span>
+                  <span className="font-semibold text-slate-700">
+                    {dispatch.created_at ? new Date(dispatch.created_at).toLocaleString() : 'Just now'}
+                  </span>
+                </div>
+              </div>
+
+              <div className="space-y-1.5 pt-1">
+                {(() => {
+                  const loadedCount = items.filter(item => !item.pull_list_no.endsWith('_pending')).length;
+                  const expected = Math.max(dispatch.total_pallets || 1, items.length);
+                  const pct = Math.min(100, Math.round((loadedCount / expected) * 100));
+                  return (
+                    <>
+                      <div className="flex justify-between text-xs font-bold font-mono">
+                        <span className="text-slate-500 uppercase tracking-wider text-[10px]">Overall Progress</span>
+                        <span>{loadedCount} / {expected} ({pct}%)</span>
+                      </div>
+                      <div className="w-full bg-slate-100 rounded-full h-2.5 overflow-hidden border border-slate-200">
+                        <div
+                          className="bg-[#4BB8FA] h-full rounded-full transition-all duration-300"
+                          style={{ width: `${pct}%` }}
+                        />
+                      </div>
+                    </>
+                  );
+                })()}
+              </div>
+
+              {/* Checklist Scroll List */}
+              <div className="space-y-3 pt-2 flex flex-col">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block font-sans">Scanning Checklist</span>
+                
+                <div className="space-y-2.5 overflow-y-auto max-h-[300px] pr-1">
+                  {/* Checked items */}
+                  {items.filter(item => !item.pull_list_no.endsWith('_pending')).map((item, idx) => (
+                    <div
+                      key={`loaded-${idx}`}
+                      className="flex items-center gap-3 text-sm font-bold text-slate-700 bg-emerald-50/40 backdrop-blur-sm p-2.5 rounded-xl border border-emerald-100/60 shadow-sm transition-all duration-200 h-12"
+                    >
+                      <span className="flex items-center justify-center w-6 h-6 rounded-full bg-emerald-100 text-emerald-800 text-xs font-black shrink-0 shadow-sm">
+                        ✓
+                      </span>
+                      <span className="font-mono text-emerald-900 font-bold tracking-wider truncate text-sm">{item.pull_list_no.replace(/_pending$/, '')}</span>
+                    </div>
+                  ))}
+
+                  {/* Pending items from the list */}
+                  {items.filter(item => item.pull_list_no.endsWith('_pending')).map((item, idx) => {
+                    const cleanPullList = item.pull_list_no.replace(/_pending$/, '');
+                    const actualIdx = items.indexOf(item);
+                    return (
+                      <div
+                        key={`pending-list-${idx}`}
+                        className="flex items-center gap-3 bg-amber-50/30 backdrop-blur-sm p-2.5 rounded-xl border border-amber-200/40 shadow-sm transition-all duration-200 hover:shadow-md h-12"
+                      >
+                        <span className="flex items-center justify-center w-6 h-6 rounded-full border border-amber-300 text-amber-500 text-xs font-extrabold shrink-0 bg-amber-50 shadow-inner">
+                          ○
+                        </span>
+                        <span className="font-mono text-amber-900 font-bold tracking-wider truncate flex-1 text-sm">{cleanPullList}</span>
+                        <button
+                          type="button"
+                          onClick={() => handleConfirmLoad(actualIdx)}
+                          className="px-3 py-1.5 bg-emerald-50/90 hover:bg-emerald-100 text-emerald-700 border border-emerald-200/60 hover:border-emerald-300 rounded-lg text-[10px] font-extrabold cursor-pointer transition-all hover:scale-[1.02] active:scale-[0.98] shadow-sm shrink-0 uppercase tracking-wider"
+                        >
+                          Mark Verified
+                        </button>
+                      </div>
+                    );
+                  })}
+
+                  {/* Remaining Blank slots */}
+                  {Array.from({ length: Math.max(0, (dispatch.total_pallets || 1) - items.length) }).map((_, idx) => (
+                    <div
+                      key={`pending-${idx}`}
+                      className="flex items-center gap-3 bg-slate-50/40 backdrop-blur-sm p-2.5 rounded-xl border border-slate-200/50 shadow-sm transition-all duration-200 hover:shadow-md hover:border-slate-300/60 h-12"
+                    >
+                      <span className="flex items-center justify-center w-6 h-6 rounded-full border-2 border-slate-300 text-slate-400 text-xs font-extrabold shrink-0 bg-slate-100/50 shadow-inner">
+                        ○
+                      </span>
+                      <div className="flex-1 flex items-center gap-2">
+                        <div className="relative flex-1 min-w-0">
+                          <Barcode size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400/80" />
+                          <input
+                            type="text"
+                            placeholder="Scan or type Pull List..."
+                            id={`pending-input-${idx}`}
+                            className="w-full pl-7 pr-2 py-1.5 text-[11px] font-mono border border-slate-200/60 bg-white/80 backdrop-blur-xs rounded-lg focus:outline-none focus:border-[#4BB8FA] focus:bg-white text-slate-700 font-bold focus:ring-2 focus:ring-[#4BB8FA]/10 placeholder-slate-400/80 transition-all uppercase"
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault();
+                                const val = (e.target as HTMLInputElement).value.trim();
+                                if (val) {
+                                  void handleMarkIndividualLoaded(val);
+                                  (e.target as HTMLInputElement).value = '';
+                                }
+                              }
+                            }}
+                          />
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const inputEl = document.getElementById(`pending-input-${idx}`) as HTMLInputElement;
+                            const val = inputEl?.value.trim();
+                            if (val) {
+                              void handleMarkIndividualLoaded(val);
+                              inputEl.value = '';
+                            }
+                          }}
+                          className="px-3 py-1.5 bg-emerald-50/90 hover:bg-emerald-100 text-emerald-700 border border-emerald-200/60 hover:border-emerald-300 rounded-lg text-[10px] font-extrabold cursor-pointer transition-all hover:scale-[1.02] active:scale-[0.98] shadow-sm shrink-0 uppercase tracking-wider"
+                        >
+                          Mark Verified
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
+    </div>
 
       {/* Manual Entry Modal */}
       <Modal
@@ -755,6 +1118,38 @@ export const NewDispatch: React.FC<NewDispatchProps> = ({
             </button>
           </div>
         </form>
+      </Modal>
+
+      {/* Confirm Departure Modal */}
+      <Modal
+        isOpen={confirmCompleteOpen}
+        onClose={() => setConfirmCompleteOpen(false)}
+        title="Confirm Dispatch"
+      >
+        <div className="space-y-4 select-none">
+          <div className="flex items-start gap-3 bg-indigo-50 p-4 rounded-xl border border-indigo-100 text-indigo-900 text-xs font-medium leading-relaxed">
+            <AlertCircle size={18} className="text-indigo-500 shrink-0 mt-0.5" />
+            <div>
+              <p className="font-bold mb-1">Confirm Departure</p>
+              <p>Has the truck physically left the warehouse? Confirming will finalize the invoice, transition status to Completed, and archive the dispatch record.</p>
+            </div>
+          </div>
+
+          <div className="flex justify-end gap-2 pt-2">
+            <button
+              onClick={() => setConfirmCompleteOpen(false)}
+              className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-semibold cursor-pointer"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleCompleteDispatch}
+              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold cursor-pointer"
+            >
+              Complete Dispatch
+            </button>
+          </div>
+        </div>
       </Modal>
     </div>
   );

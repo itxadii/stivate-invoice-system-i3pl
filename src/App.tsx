@@ -4,6 +4,7 @@ import { Header } from './components/Header';
 import { Dashboard } from './pages/Dashboard';
 import { NewDispatch } from './pages/NewDispatch';
 import { DispatchHistory } from './pages/DispatchHistory';
+import { DispatchPipeline } from './pages/DispatchPipeline';
 import { Reports } from './pages/Reports';
 import { Settings } from './pages/Settings';
 import { settingsService } from './services/ipc';
@@ -14,6 +15,7 @@ function App() {
   const [activeTab, setActiveTab] = useState<string>('dashboard');
   const [previousTab, setPreviousTab] = useState<string>('dashboard');
   const [editDispatchId, setEditDispatchId] = useState<number | null>(null);
+  const [triggerNewDispatch, setTriggerNewDispatch] = useState<boolean>(false);
   
   const [settings, setSettings] = useState<AppSettings>({
     companyName: 'I3PL INDIA PVT LTD',
@@ -57,13 +59,15 @@ function App() {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'n') {
         e.preventDefault();
         setEditDispatchId(null);
-        setActiveTab('new-dispatch');
+        setActiveTab('pipeline');
+        setTriggerNewDispatch(false);
+        setTimeout(() => setTriggerNewDispatch(true), 0);
       }
       
-      // Ctrl + H: Dispatch History
+      // Ctrl + H: Completed Dispatches
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'h') {
         e.preventDefault();
-        setActiveTab('history');
+        setActiveTab('completed');
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -87,8 +91,10 @@ function App() {
         return 'Dashboard Overview';
       case 'new-dispatch':
         return editDispatchId ? 'Edit Dispatch' : 'Create Dispatch';
-      case 'history':
-        return 'Dispatch History Archive';
+      case 'pipeline':
+        return 'Dispatch Pipeline (Active)';
+      case 'completed':
+        return 'Completed Dispatches (Shipped)';
       case 'reports':
         return 'Performance Reports';
       case 'settings':
@@ -136,8 +142,15 @@ function App() {
               previousTab={previousTab}
             />
           )}
-          {activeTab === 'history' && (
-            <DispatchHistory onEditDispatch={handleEditDispatch} />
+          {activeTab === 'pipeline' && (
+            <DispatchPipeline
+              onEditDispatch={handleEditDispatch}
+              triggerNewDispatch={triggerNewDispatch}
+              onNewDispatchTriggered={() => setTriggerNewDispatch(false)}
+            />
+          )}
+          {activeTab === 'completed' && (
+            <DispatchHistory />
           )}
           {activeTab === 'reports' && (
             <Reports />

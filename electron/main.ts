@@ -13,11 +13,12 @@ import {
   getDashboardStats,
   getReportsData,
   getTrendData,
-  getDb
+  getDb,
+  getPipelineStats
 } from './ipc/database';
 import { backupDatabase, uploadBackupToCloud } from './ipc/backup';
 import { printChallan, printBarcodes, printCombinedDispatch } from './ipc/printer';
-import { checkForUpdates, downloadUpdate, installUpdate, getUpdateInfo } from './updater';
+import { checkForUpdates, downloadUpdate, installUpdate, getUpdateInfo, initUpdater } from './updater';
 
 let mainWindow: BrowserWindow | null = null;
 // Database indexing initialized
@@ -33,6 +34,8 @@ function createWindow() {
       nodeIntegration: false,
     },
   });
+
+  initUpdater(mainWindow);
 
   // Load React app
   const isDev = !app.isPackaged;
@@ -52,9 +55,9 @@ function createWindow() {
     // Prevent default exit
     e.preventDefault();
     isBackingUpAndQuitting = true;
-    
+
     console.log('App closing: Triggering automatic local and cloud S3 backup...');
-    
+
     // Hide window immediately for responsive closure UX
     if (mainWindow) {
       mainWindow.hide();
@@ -93,7 +96,7 @@ app.whenReady().then(() => {
     const seedFlagPath = path.join(process.cwd(), 'run_seed.flag');
     if (fs.existsSync(seedFlagPath)) {
       console.log('Seeding flag found. Generating test database records (300k+ rows)...');
-      
+
       // Seed master pull lists (1,000,000 records / 10 Lakhs)
       const insertMaster = db.prepare(`
         INSERT OR REPLACE INTO pull_list_master (pull_list_no, id_number, kit_type, workcell, parts, barcode)
@@ -135,10 +138,10 @@ app.whenReady().then(() => {
           const address = 'JABIL CURCUIT INDIA PVT LTD (EHTP UNIT)\nPLOT NO-B-26, Ranjangaon MIDC';
           const totalPallets = (d % 5) + 1;
           const totalParts = 500;
-          
+
           const res = insertDispatch.run(dcNo, date, vehicleNo, supplierName, address, totalPallets, totalParts, 'Operator', 'AS PER LIST');
           const dispatchId = res.lastInsertRowid;
-          
+
           for (let itemIdx = 1; itemIdx <= 10; itemIdx++) {
             const plIndex = ((d * 10 + itemIdx) % 1000000) + 1;
             const pullListNo = `PL-${String(plIndex).padStart(7, '0')}`;
@@ -184,12 +187,12 @@ app.whenReady().then(() => {
     return getDispatch(id);
   });
 
-  ipcMain.handle('db:getAllDispatches', (_, limit, offset) => {
-    return getAllDispatches(limit, offset);
+  ipcMain.handle('db:getAllDispatches', (_, status, limit, offset) => {
+    return getAllDispatches(status, limit, offset);
   });
 
-  ipcMain.handle('db:searchDispatches', (_, query, limit, offset) => {
-    return searchDispatches(query, limit, offset);
+  ipcMain.handle('db:searchDispatches', (_, query, status, limit, offset) => {
+    return searchDispatches(query, status, limit, offset);
   });
 
   ipcMain.handle('db:searchPullList', (_, pullListNo) => {
@@ -208,8 +211,8 @@ app.whenReady().then(() => {
     return getTrendData(range);
   });
 
-  ipcMain.handle('db:getReports', (_, type, startDate, endDate) => {
-    return getReportsData(type, startDate, endDate);
+  ipcMain.handle('db:getReports', (_, type, startDate, endDate, destination) => {
+    return getReportsData(type, startDate, endDate, destination);
   });
 
   ipcMain.handle('backup:trigger', () => {
@@ -247,6 +250,10 @@ app.whenReady().then(() => {
 
   ipcMain.handle('updater:getVersion', () => {
     return getUpdateInfo();
+  });
+
+  ipcMain.handle('db:getPipelineStats', () => {
+    return getPipelineStats();
   });
 
   createWindow();

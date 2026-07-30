@@ -55,7 +55,7 @@ const initializeSchema = (db: any) => {
       transaction_type TEXT,
       created_by TEXT NOT NULL,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-      status TEXT DEFAULT 'draft'
+      status TEXT DEFAULT 'loading'
     );
 
     CREATE TABLE IF NOT EXISTS dispatch_items (
@@ -112,10 +112,10 @@ const initializeSchema = (db: any) => {
     db.exec(`ALTER TABLE dispatches ADD COLUMN transaction_type TEXT;`);
   } catch (e) {}
   try {
-    db.exec(`ALTER TABLE dispatches ADD COLUMN status TEXT DEFAULT 'draft';`);
+    db.exec(`ALTER TABLE dispatches ADD COLUMN status TEXT DEFAULT 'loading';`);
   } catch (e) {}
   try {
-    db.exec(`UPDATE dispatches SET status = 'draft' WHERE status IS NULL OR status = '' OR status = 'completed' AND id IN (SELECT id FROM dispatches WHERE status = 'completed' AND created_at IS NULL);`);
+    db.exec(`UPDATE dispatches SET status = 'loading' WHERE status IS NULL OR status = '' OR status = 'draft';`);
   } catch (e) {}
 
   // Ensure default operator user
@@ -219,7 +219,7 @@ export const saveDispatch = (dispatch: any, items: any[]) => {
         dispatch.scanning_by || '',
         dispatch.verify_by || '',
         dispatch.transaction_type || '',
-        dispatch.status || 'draft',
+        dispatch.status || 'loading',
         dispatchId
       );
 
@@ -247,7 +247,7 @@ export const saveDispatch = (dispatch: any, items: any[]) => {
         dispatch.scanning_by || '',
         dispatch.verify_by || '',
         dispatch.transaction_type || '',
-        dispatch.status || 'draft'
+        dispatch.status || 'loading'
       );
       dispatchId = result.lastInsertRowid;
     }
@@ -301,50 +301,70 @@ export const getDispatch = (id: number) => {
   return { ...dispatch, items };
 };
 
-export const getAllDispatches = (limit?: number, offset?: number) => {
+export const getAllDispatches = (status?: string | string[], limit?: number, offset?: number) => {
   const db = getDb();
-  if (limit !== undefined && offset !== undefined) {
-    return db.prepare('SELECT * FROM dispatches ORDER BY date DESC, id DESC LIMIT ? OFFSET ?').all(limit, offset);
+  let query = 'SELECT * FROM dispatches';
+  const params: any[] = [];
+
+  if (status) {
+    if (Array.isArray(status)) {
+      query += ` WHERE status IN (${status.map(() => '?').join(',')})`;
+      params.push(...status);
+    } else {
+      query += ' WHERE status = ?';
+      params.push(status);
+    }
   }
-  return db.prepare('SELECT * FROM dispatches ORDER BY date DESC, id DESC').all();
+
+  query += ' ORDER BY date DESC, id DESC';
+
+  if (limit !== undefined && offset !== undefined) {
+    query += ' LIMIT ? OFFSET ?';
+    params.push(limit, offset);
+  }
+
+  return db.prepare(query).all(...params);
 };
 
-export const searchDispatches = (query: string, limit?: number, offset?: number) => {
+export const searchDispatches = (query: string, status?: string | string[], limit?: number, offset?: number) => {
   const db = getDb();
   if (!query || query.trim() === '') {
-    return getAllDispatches(limit, offset);
+    return getAllDispatches(status, limit, offset);
   }
 
   const wild = `%${query}%`;
-  // Search dispatches matching criteria or matching sub items
-  if (limit !== undefined && offset !== undefined) {
-    return db.prepare(`
-      SELECT DISTINCT d.* 
-      FROM dispatches d
-      LEFT JOIN dispatch_items di ON d.id = di.dispatch_id
-      WHERE d.dc_no LIKE ? 
-         OR d.vehicle_no LIKE ? 
-         OR d.supplier_name LIKE ? 
-         OR d.address LIKE ? 
-         OR di.pull_list_no LIKE ?
-         OR di.id_number LIKE ?
-      ORDER BY d.date DESC, d.id DESC
-      LIMIT ? OFFSET ?
-    `).all(wild, wild, wild, wild, wild, wild, limit, offset);
-  }
-
-  return db.prepare(`
+  let sql = `
     SELECT DISTINCT d.* 
     FROM dispatches d
     LEFT JOIN dispatch_items di ON d.id = di.dispatch_id
-    WHERE d.dc_no LIKE ? 
+    WHERE (d.dc_no LIKE ? 
        OR d.vehicle_no LIKE ? 
        OR d.supplier_name LIKE ? 
        OR d.address LIKE ? 
        OR di.pull_list_no LIKE ?
        OR di.id_number LIKE ?
-    ORDER BY d.date DESC, d.id DESC
-  `).all(wild, wild, wild, wild, wild, wild);
+    )
+  `;
+  const params: any[] = [wild, wild, wild, wild, wild, wild];
+
+  if (status) {
+    if (Array.isArray(status)) {
+      sql += ` AND d.status IN (${status.map(() => '?').join(',')})`;
+      params.push(...status);
+    } else {
+      sql += ' AND d.status = ?';
+      params.push(status);
+    }
+  }
+
+  sql += ' ORDER BY d.date DESC, d.id DESC';
+
+  if (limit !== undefined && offset !== undefined) {
+    sql += ' LIMIT ? OFFSET ?';
+    params.push(limit, offset);
+  }
+
+  return db.prepare(sql).all(...params);
 };
 
 export const searchPullList = (pullListNo: string) => {
@@ -392,7 +412,7 @@ export const getDashboardStats = () => {
   const db = getDb();
   const todayStr = new Date().toISOString().split('T')[0];
 
-  const todayDispatches = db.prepare('SELECT COUNT(*) as count FROM dispatches WHERE date = ?').get(todayStr) as { count: number };
+  const todayDispatches = db.prepare('SELECT COUNT(*) as count FROM dispatches WHERE date LIKE ?').get(`${todayStr}%`) as { count: number };
   const totalDispatches = db.prepare('SELECT COUNT(*) as count FROM dispatches').get() as { count: number };
   const totalPullLists = db.prepare('SELECT COUNT(*) as count FROM pull_list_master').get() as { count: number };
   
@@ -400,9 +420,9 @@ export const getDashboardStats = () => {
 
   // Daily dispatches trend (last 7 days of activity)
   const trendData = db.prepare(`
-    SELECT date, COUNT(*) as count 
+    SELECT SUBSTR(date, 1, 10) as date, COUNT(*) as count 
     FROM dispatches 
-    GROUP BY date 
+    GROUP BY SUBSTR(date, 1, 10) 
     ORDER BY date DESC 
     LIMIT 7
   `).all() as { date: string; count: number }[];
@@ -426,36 +446,43 @@ export const getDashboardStats = () => {
   };
 };
 
-export const getReportsData = (reportType: string, startDate?: string, endDate?: string) => {
+export const getReportsData = (reportType: string, startDate?: string, endDate?: string, destination?: string) => {
   const db = getDb();
   
-  let dateFilter = '';
+  const conditions: string[] = [];
   const params: any[] = [];
   
   if (startDate && endDate) {
-    dateFilter = 'WHERE date BETWEEN ? AND ?';
+    conditions.push('SUBSTR(date, 1, 10) BETWEEN ? AND ?');
     params.push(startDate, endDate);
   } else if (startDate) {
-    dateFilter = 'WHERE date >= ?';
+    conditions.push('SUBSTR(date, 1, 10) >= ?');
     params.push(startDate);
   } else if (endDate) {
-    dateFilter = 'WHERE date <= ?';
+    conditions.push('SUBSTR(date, 1, 10) <= ?');
     params.push(endDate);
   }
 
+  if (destination && destination !== 'ALL') {
+    conditions.push('(address LIKE ? OR supplier_name LIKE ?)');
+    params.push(`%${destination}%`, `%${destination}%`);
+  }
+
+  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
   if (reportType === 'daily') {
     return db.prepare(`
-      SELECT date, COUNT(*) as dispatch_count, SUM(total_pallets) as total_pallets, SUM(total_parts) as total_parts
+      SELECT SUBSTR(date, 1, 10) as date, COUNT(*) as dispatch_count, SUM(total_pallets) as total_pallets, SUM(total_parts) as total_parts
       FROM dispatches
-      ${dateFilter}
-      GROUP BY date
+      ${whereClause}
+      GROUP BY SUBSTR(date, 1, 10)
       ORDER BY date DESC
     `).all(...params);
   } else if (reportType === 'monthly') {
     return db.prepare(`
       SELECT strftime('%Y-%m', date) as month, COUNT(*) as dispatch_count, SUM(total_pallets) as total_pallets, SUM(total_parts) as total_parts
       FROM dispatches
-      ${dateFilter}
+      ${whereClause}
       GROUP BY month
       ORDER BY month DESC
     `).all(...params);
@@ -463,7 +490,7 @@ export const getReportsData = (reportType: string, startDate?: string, endDate?:
     return db.prepare(`
       SELECT vehicle_no, COUNT(*) as dispatch_count, SUM(total_pallets) as total_pallets, SUM(total_parts) as total_parts
       FROM dispatches
-      ${dateFilter}
+      ${whereClause}
       GROUP BY vehicle_no
       ORDER BY dispatch_count DESC
     `).all(...params);
@@ -471,10 +498,97 @@ export const getReportsData = (reportType: string, startDate?: string, endDate?:
     return db.prepare(`
       SELECT supplier_name, COUNT(*) as dispatch_count, SUM(total_pallets) as total_pallets, SUM(total_parts) as total_parts
       FROM dispatches
-      ${dateFilter}
+      ${whereClause}
       GROUP BY supplier_name
       ORDER BY dispatch_count DESC
     `).all(...params);
+  } else if (reportType === 'loading-summary') {
+    const dispatches = db.prepare(`
+      SELECT * FROM dispatches
+      ${whereClause}
+      ORDER BY date ASC, id ASC
+    `).all(...params);
+
+    const getItemsStmt = db.prepare(`
+      SELECT * FROM dispatch_items WHERE dispatch_id = ? ORDER BY id ASC
+    `);
+
+    const resultRows: any[] = [];
+    let srNo = 1;
+    const monthsUpper = ['JANUARY', 'FEBRUARY', 'MARCH', 'APRIL', 'MAY', 'JUNE', 'JULY', 'AUGUST', 'SEPTEMBER', 'OCTOBER', 'NOVEMBER', 'DECEMBER'];
+
+    for (const d of dispatches) {
+      const items = getItemsStmt.all(d.id);
+      
+      const normDate = d.date.includes('T') ? d.date : d.date.replace(' ', 'T');
+      const dateObj = new Date(normDate);
+
+      let formattedDate = d.date.substring(0, 10);
+      let outTime = '00:00';
+      let monthName = 'JULY';
+
+      if (!isNaN(dateObj.getTime())) {
+        const year = dateObj.getFullYear();
+        const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+        const day = String(dateObj.getDate()).padStart(2, '0');
+        formattedDate = `${day}-${month}-${year}`;
+
+        const hours = String(dateObj.getHours()).padStart(2, '0');
+        const mins = String(dateObj.getMinutes()).padStart(2, '0');
+        outTime = `${hours}:${mins}`;
+
+        monthName = monthsUpper[dateObj.getMonth()];
+      }
+
+      let vehicleType = d.particular || '32FT';
+      if (vehicleType === 'AS PER LIST' || !vehicleType) {
+        vehicleType = '32FT';
+      }
+
+      let department = d.supplier_name || 'PM';
+
+      if (items && items.length > 0) {
+        const workcellMap = new Map<string, number>();
+        for (const item of items) {
+          const wc = (item.workcell || item.kit_type || 'GENERAL').trim();
+          workcellMap.set(wc, (workcellMap.get(wc) || 0) + 1);
+        }
+
+        let isFirstRowOfDispatch = true;
+        for (const [wcName, palletCount] of workcellMap.entries()) {
+          resultRows.push({
+            sr_no: srNo++,
+            date: formattedDate,
+            vehicle_no: d.vehicle_no,
+            vehicle_type: vehicleType,
+            department: department,
+            workcell: wcName,
+            pallets: palletCount,
+            out_time: outTime,
+            round: isFirstRowOfDispatch ? 1 : 0,
+            month: monthName,
+            remark: ''
+          });
+          isFirstRowOfDispatch = false;
+        }
+      } else {
+        resultRows.push({
+          sr_no: srNo++,
+          date: formattedDate,
+          vehicle_no: d.vehicle_no,
+          vehicle_type: vehicleType,
+          department: department,
+          workcell: 'GENERAL',
+          pallets: d.total_pallets || 1,
+          out_time: outTime,
+          round: 1,
+          month: monthName,
+          remark: ''
+        });
+      }
+    }
+
+    return resultRows;
   }
 
   return [];
@@ -486,10 +600,10 @@ export const getTrendData = (range: string) => {
   if (range === 'thisMonth') {
     const currentMonthPrefix = new Date().toISOString().substring(0, 7) + '%';
     return db.prepare(`
-      SELECT date, COUNT(*) as count 
+      SELECT SUBSTR(date, 1, 10) as date, COUNT(*) as count 
       FROM dispatches 
       WHERE date LIKE ? 
-      GROUP BY date 
+      GROUP BY SUBSTR(date, 1, 10) 
       ORDER BY date ASC
     `).all(currentMonthPrefix) as { date: string; count: number }[];
   }
@@ -516,11 +630,41 @@ export const getTrendData = (range: string) => {
   
   // Default to 7days
   const data = db.prepare(`
-    SELECT date, COUNT(*) as count 
+    SELECT SUBSTR(date, 1, 10) as date, COUNT(*) as count 
     FROM dispatches 
-    GROUP BY date 
+    GROUP BY SUBSTR(date, 1, 10) 
     ORDER BY date DESC 
     LIMIT 7
   `).all() as { date: string; count: number }[];
   return data.reverse();
+};
+
+export const getPipelineStats = () => {
+  const db = getDb();
+  const todayStr = new Date().toISOString().split('T')[0];
+
+  const loadingRow = db.prepare("SELECT COUNT(*) as count FROM dispatches WHERE status = 'loading'").get() as { count: number };
+  const readyRow = db.prepare("SELECT COUNT(*) as count FROM dispatches WHERE status = 'ready'").get() as { count: number };
+  const completedTodayRow = db.prepare("SELECT COUNT(*) as count FROM dispatches WHERE status = 'completed' AND date LIKE ?").get(`${todayStr}%`) as { count: number };
+
+  const activeDispatches = db.prepare("SELECT id, total_pallets FROM dispatches WHERE status IN ('loading', 'ready')").all() as { id: number; total_pallets: number }[];
+  let expected = 0;
+  let loaded = 0;
+  for (const d of activeDispatches) {
+    expected += d.total_pallets;
+    const itemCount = db.prepare('SELECT COUNT(*) as count FROM dispatch_items WHERE dispatch_id = ?').get(d.id) as { count: number };
+    loaded += itemCount?.count || 0;
+  }
+  const pendingPullLists = Math.max(0, expected - loaded);
+
+  const totalTodayRow = db.prepare('SELECT SUM(total_pallets) as sum FROM dispatches WHERE date LIKE ?').get(`${todayStr}%`) as { sum: number | null };
+  const totalPullListsToday = totalTodayRow?.sum || 0;
+
+  return {
+    loadingCount: loadingRow?.count || 0,
+    readyCount: readyRow?.count || 0,
+    completedTodayCount: completedTodayRow?.count || 0,
+    pendingPullLists,
+    totalPullListsToday
+  };
 };
