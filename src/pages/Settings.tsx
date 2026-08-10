@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { settingsService, backupService, updaterService } from '../services/ipc';
 import type { AppSettings } from '../types';
-import { Save, Database, HardDriveDownload, Sparkles, FolderOpen, RefreshCcw, Cloud, BookOpen, HelpCircle, Keyboard } from 'lucide-react';
+import { Save, Database, HardDriveDownload, Sparkles, FolderOpen, RefreshCcw, Cloud, BookOpen, HelpCircle, Keyboard, ShieldCheck, FileText, Lock } from 'lucide-react';
+import { Modal } from '../components/Modal';
 
 interface SettingsProps {
   onSettingsSaved: () => void;
@@ -48,6 +49,7 @@ export const Settings: React.FC<SettingsProps> = ({ onSettingsSaved }) => {
   const [featureRequestMessage, setFeatureRequestMessage] = useState('');
   const [featureRequestResult, setFeatureRequestResult] = useState('');
   const [submittingFeatureRequest, setSubmittingFeatureRequest] = useState(false);
+  const [activePolicyModal, setActivePolicyModal] = useState<'privacy' | 'security' | null>(null);
 
   const fetchSettings = async () => {
     try {
@@ -338,6 +340,32 @@ export const Settings: React.FC<SettingsProps> = ({ onSettingsSaved }) => {
               <p>• <strong>Landscape Printing:</strong> Both Challan invoices and Barcode sheets print in high-clarity A4 Landscape format for instant scanner recognition.</p>
               <p>• <strong>Auto-Updates:</strong> Check for application updates anytime in this Settings menu. Downloaded updates install in 1-click on restart.</p>
             </div>
+          </div>
+        </div>
+
+        {/* Application Legal & Security Policies Bar */}
+        <div className="pt-4 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-3">
+          <div className="flex items-center gap-2 text-xs font-bold text-slate-600">
+            <ShieldCheck size={16} className="text-emerald-500" />
+            <span>Software Governance & Security Compliance</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setActivePolicyModal('privacy')}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-lg text-xs font-bold transition-colors cursor-pointer"
+            >
+              <FileText size={13} className="text-blue-500" />
+              <span>Privacy Policy</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setActivePolicyModal('security')}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-lg text-xs font-bold transition-colors cursor-pointer"
+            >
+              <Lock size={13} className="text-emerald-500" />
+              <span>Security Policy</span>
+            </button>
           </div>
         </div>
       </div>
@@ -775,6 +803,38 @@ export const Settings: React.FC<SettingsProps> = ({ onSettingsSaved }) => {
             </div>
           </div>
 
+          {/* Legal & Security Policies */}
+          <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-4">
+            <h4 className="text-sm font-bold text-slate-700 uppercase tracking-wider flex items-center gap-2">
+              <ShieldCheck size={16} className="text-blue-500" />
+              Legal & Security Policies
+            </h4>
+
+            <div className="text-xs text-slate-500 space-y-1">
+              <p>Review the application's offline privacy policy and data security architecture guidelines.</p>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => setActivePolicyModal('privacy')}
+                className="flex items-center justify-center gap-1.5 px-3 py-2 bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-lg text-xs font-bold cursor-pointer transition-colors"
+              >
+                <FileText size={14} className="text-blue-500" />
+                <span>Privacy Policy</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setActivePolicyModal('security')}
+                className="flex items-center justify-center gap-1.5 px-3 py-2 bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-lg text-xs font-bold cursor-pointer transition-colors"
+              >
+                <Lock size={14} className="text-emerald-500" />
+                <span>Security Policy</span>
+              </button>
+            </div>
+          </div>
+
           {/* Created By Logo (bottom right corner) */}
           <div className="flex flex-col items-center justify-end pt-16 mt-auto space-y-3 opacity-95 select-none">
             <span className="text-xs font-bold text-slate-400 uppercase tracking-widest">Software Developed By</span>
@@ -782,6 +842,215 @@ export const Settings: React.FC<SettingsProps> = ({ onSettingsSaved }) => {
           </div>
         </div>
       </div>
+
+      {/* Privacy Policy & Security Policy Modal */}
+      <Modal
+        isOpen={activePolicyModal !== null}
+        onClose={() => setActivePolicyModal(null)}
+        title={activePolicyModal === 'privacy' ? 'Application Privacy Policy' : 'Application Security Policy'}
+        maxWidth="max-w-4xl"
+      >
+        {activePolicyModal === 'privacy' && (
+          <div className="space-y-6 text-slate-700 leading-relaxed text-sm">
+            <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 flex flex-wrap items-center justify-between gap-3 select-none">
+              <div>
+                <h2 className="text-base font-bold text-slate-800">Privacy Policy</h2>
+                <p className="text-xs text-slate-500 font-medium">Offline Warehouse Dispatch Management Software</p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2 text-xs font-bold">
+                <span className="px-2.5 py-1 bg-blue-50 text-blue-700 rounded-md border border-blue-100">Effective: 10 Aug 2026</span>
+                <span className="px-2.5 py-1 bg-slate-100 text-slate-700 rounded-md border border-slate-200">v1.0</span>
+                <span className="px-2.5 py-1 bg-emerald-50 text-emerald-700 rounded-md border border-emerald-100">Provider: Stivate</span>
+              </div>
+            </div>
+
+            <div className="space-y-5">
+              <section className="space-y-1.5">
+                <h4 className="text-sm font-bold text-slate-900 uppercase tracking-wide">1. Introduction</h4>
+                <p className="text-xs text-slate-600">
+                  This Privacy Policy explains how Stivate handles information processed through the Offline Warehouse Dispatch Management Software ("Software").
+                </p>
+                <p className="text-xs text-slate-600">
+                  The Software is designed primarily as an offline Windows application. Operational data is stored locally on the customer's computer. Certain services, such as automated cloud backups, software updates, and support requests, may require an internet connection.
+                </p>
+                <p className="text-xs text-slate-600">
+                  We aim to collect and process only information necessary to provide, maintain, secure, back up, and improve the Software.
+                </p>
+              </section>
+
+              <section className="space-y-1.5">
+                <h4 className="text-sm font-bold text-slate-900 uppercase tracking-wide">2. Information Processed by the Software</h4>
+                <p className="text-xs text-slate-600">Depending on how the customer uses the Software, the following information may be stored:</p>
+                
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
+                  <div className="bg-slate-50 p-3.5 rounded-lg border border-slate-200 text-xs space-y-1">
+                    <strong className="text-slate-800">Dispatch Information:</strong>
+                    <ul className="list-disc pl-4 text-slate-600 space-y-0.5">
+                      <li>Dispatch Challan number & date</li>
+                      <li>Vehicle number & Particulars</li>
+                      <li>Supervisor, Scanner & Verifier names</li>
+                      <li>Consignee info & Address</li>
+                      <li>Pallet & Transaction details</li>
+                      <li>Dispatch status</li>
+                    </ul>
+                  </div>
+                  <div className="bg-slate-50 p-3.5 rounded-lg border border-slate-200 text-xs space-y-1">
+                    <strong className="text-slate-800">Pull List & Technical Data:</strong>
+                    <ul className="list-disc pl-4 text-slate-600 space-y-0.5">
+                      <li>Pull List & ID reference numbers</li>
+                      <li>Kit, Workcell & Parts quantity</li>
+                      <li>Barcode information</li>
+                      <li>Creation & modification timestamps</li>
+                      <li>Application version & OS details</li>
+                      <li>Logs & Configuration settings</li>
+                    </ul>
+                  </div>
+                </div>
+              </section>
+
+              <section className="space-y-1.5">
+                <h4 className="text-sm font-bold text-slate-900 uppercase tracking-wide">3. Offline Data Processing</h4>
+                <p className="text-xs text-slate-600">
+                  The Software is designed to operate without an active internet connection. Operational dispatch information is primarily stored on the customer's local computer. Internet connectivity is not required for normal dispatch operations including creating dispatches, scanning Pull Lists, editing dispatches, printing documents, viewing history, and generating reports when the computer is offline.
+                </p>
+              </section>
+
+              <section className="space-y-1.5">
+                <h4 className="text-sm font-bold text-slate-900 uppercase tracking-wide">4. Cloud Backup & Storage</h4>
+                <p className="text-xs text-slate-600">
+                  The Software may automatically create cloud backups of the local application database to protect against computer failure, database corruption, accidental deletion, hardware failure, or local data loss. Cloud backups contain operational information stored in the application's local database and are performed solely for data protection and recovery.
+                </p>
+                <p className="text-xs text-slate-600">
+                  Cloud backups are stored using secure cloud infrastructure providers selected by Stivate or agreed with the customer. Stivate does not use customer dispatch data for advertising, selling data, profiling employees, or unrelated commercial purposes.
+                </p>
+              </section>
+
+              <section className="space-y-1.5">
+                <h4 className="text-sm font-bold text-slate-900 uppercase tracking-wide">5. Software Updates & Support Requests</h4>
+                <p className="text-xs text-slate-600">
+                  The Software may periodically check for available software updates by communicating limited technical information necessary to determine whether a newer version is available. Updates provide bug fixes, performance improvements, and security enhancements without transmitting dispatch data.
+                </p>
+                <p className="text-xs text-slate-600">
+                  Support or feature requests voluntarily submitted by the user process company name, version, feature description, contact info, and technical details solely for providing support.
+                </p>
+              </section>
+
+              <section className="space-y-1.5">
+                <h4 className="text-sm font-bold text-slate-900 uppercase tracking-wide">6. Data Sharing, Retention & Deletion</h4>
+                <p className="text-xs text-slate-600">
+                  Stivate does not sell customer operational data. Local dispatch data remains under customer control. Deletion of local application data may be performed by an authorized customer administrator. Cloud backups are retained according to the backup retention policy agreed upon with the customer.
+                </p>
+              </section>
+
+              <section className="space-y-1.5">
+                <h4 className="text-sm font-bold text-slate-900 uppercase tracking-wide">7. Security & Customer Responsibility</h4>
+                <p className="text-xs text-slate-600">
+                  Stivate takes reasonable technical and organizational measures (restricted access, database protection, backup controls, access-controlled cloud storage, secure updates) to protect customer information. Customers remain responsible for securing physical PC access, maintaining Windows user accounts, protecting administrator credentials, and preventing unauthorized access.
+                </p>
+              </section>
+
+              <section className="space-y-1.5 pt-2">
+                <h4 className="text-sm font-bold text-slate-900 uppercase tracking-wide">8. Contact</h4>
+                <div className="bg-blue-50/50 p-4 rounded-xl border border-blue-100 text-xs text-slate-700 space-y-1 font-medium select-none">
+                  <p><strong>Provider:</strong> Stivate</p>
+                  <p><strong>Email:</strong> support@stivate.com</p>
+                  <p><strong>Website:</strong> https://stivate.com</p>
+                </div>
+              </section>
+            </div>
+          </div>
+        )}
+
+        {activePolicyModal === 'security' && (
+          <div className="space-y-6 text-slate-700 leading-relaxed text-sm">
+            <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 flex flex-wrap items-center justify-between gap-3 select-none">
+              <div>
+                <h2 className="text-base font-bold text-slate-800">Security Policy</h2>
+                <p className="text-xs text-slate-500 font-medium">Offline Warehouse Dispatch Management Software Architecture & Security Controls</p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2 text-xs font-bold">
+                <span className="px-2.5 py-1 bg-emerald-50 text-emerald-700 rounded-md border border-emerald-100">Offline-First</span>
+                <span className="px-2.5 py-1 bg-blue-50 text-blue-700 rounded-md border border-blue-100">Encrypted Backups</span>
+                <span className="px-2.5 py-1 bg-slate-100 text-slate-700 rounded-md border border-slate-200">Stivate Security</span>
+              </div>
+            </div>
+
+            <div className="space-y-5">
+              <section className="space-y-1.5">
+                <h4 className="text-sm font-bold text-slate-900 uppercase tracking-wide">1. Purpose & Security Architecture</h4>
+                <p className="text-xs text-slate-600">
+                  This Security Policy describes the security principles and controls applicable to the Software and its supporting services. The primary objective is to protect customer operational information while maintaining reliable warehouse operations without internet dependencies.
+                </p>
+                
+                <div className="bg-slate-900 text-slate-200 font-mono text-xs p-4 rounded-xl border border-slate-800 leading-relaxed select-none">
+                  <div className="text-emerald-400 font-bold mb-1">// System Architecture Diagram</div>
+                  <div>Warehouse PC</div>
+                  <div>     │</div>
+                  <div>     ├── Local Application Interface</div>
+                  <div>     ├── Local SQLite Database (Restricted Filesystem Permissions)</div>
+                  <div>     ├── Local Backups</div>
+                  <div>     └── Internet when available</div>
+                  <div>              │</div>
+                  <div>              ├── Cloud Backup (Private Storage, Encrypted in Transit & Rest)</div>
+                  <div>              └── Software Updates (Trusted Release Infrastructure)</div>
+                </div>
+              </section>
+
+              <section className="space-y-1.5">
+                <h4 className="text-sm font-bold text-slate-900 uppercase tracking-wide">2. Database & Backup Security Controls</h4>
+                <ul className="list-disc pl-4 text-xs text-slate-600 space-y-1">
+                  <li><strong>Local Database:</strong> Stored outside installation directory, protected by Windows filesystem permissions, not exposed through unauthenticated network services.</li>
+                  <li><strong>Local & Cloud Backups:</strong> Stored with controlled permissions and defined retention. Cloud backups use private storage, disabled public access, restricted roles, and encryption in transit/rest.</li>
+                  <li><strong>Cloud Credentials Safety:</strong> Credentials must never be hardcoded into application source code or committed to GitHub repositories (e.g. AWS access keys). Secure environment/credential management is enforced.</li>
+                </ul>
+              </section>
+
+              <section className="space-y-1.5">
+                <h4 className="text-sm font-bold text-slate-900 uppercase tracking-wide">3. Access Control & Release Integrity</h4>
+                <p className="text-xs text-slate-600">
+                  Access to customer systems and cloud infrastructure follows the principle of least privilege. Software updates are distributed exclusively through authenticated/trusted release infrastructure with explicit semantic versioning (e.g. 1.0.0, 1.0.1, 1.1.0, 2.0.0).
+                </p>
+              </section>
+
+              <section className="space-y-1.5">
+                <h4 className="text-sm font-bold text-slate-900 uppercase tracking-wide">4. Incident Response Steps</h4>
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2 pt-1 select-none">
+                  <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 text-xs">
+                    <strong className="text-slate-800">1. Identify</strong>
+                    <p className="text-[11px] text-slate-500">Confirm & log incident</p>
+                  </div>
+                  <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 text-xs">
+                    <strong className="text-slate-800">2. Contain</strong>
+                    <p className="text-[11px] text-slate-500">Isolate affected system</p>
+                  </div>
+                  <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 text-xs">
+                    <strong className="text-slate-800">3. Recover</strong>
+                    <p className="text-[11px] text-slate-500">Restore safely from backups</p>
+                  </div>
+                  <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 text-xs">
+                    <strong className="text-slate-800">4. Resolve</strong>
+                    <p className="text-[11px] text-slate-500">Apply patch & notify</p>
+                  </div>
+                </div>
+              </section>
+
+              <section className="space-y-1.5">
+                <h4 className="text-sm font-bold text-slate-900 uppercase tracking-wide">5. Security Responsibilities</h4>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs pt-1">
+                  <div className="bg-emerald-50/50 p-3.5 rounded-xl border border-emerald-100 space-y-1">
+                    <strong className="text-emerald-900">Stivate Responsibilities:</strong>
+                    <p className="text-slate-600">Application security, secure development, release management, cloud infrastructure configuration, and incident response within scope.</p>
+                  </div>
+                  <div className="bg-blue-50/50 p-3.5 rounded-xl border border-blue-100 space-y-1">
+                    <strong className="text-blue-900">Customer Responsibilities:</strong>
+                    <p className="text-slate-600">Physical PC security, Windows account security, authorized operator access, protecting local credentials, and internal security procedures.</p>
+                  </div>
+                </div>
+              </section>
+            </div>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 };
