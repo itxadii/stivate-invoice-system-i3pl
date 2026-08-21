@@ -17,6 +17,7 @@
 
 ## 📌 Executive Overview
 
+
 The **Warehouse Dispatch Management System** is a mission-critical desktop application designed for high-throughput warehouse and logistics environments. It streamlines vehicle dispatching, barcode scanning, pull-list verification, delivery challan generation, and departure reporting.
 
 Engineered with an **Offline-First Architecture**, the application guarantees uninterrupted warehouse operations even during network outages, while seamlessly synchronizing encrypted database backups to AWS S3 Cloud when internet connectivity is available.

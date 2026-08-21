@@ -1,0 +1,40 @@
+{
+  "companyName": "I3PL INDIA PVT LTD",
+  "address": "Gat No. 1462/63, Dhoksangavi, Tal-Shirur, Dist-Pune, Maharashtra-412209\nContact Number : +918625866581\nE-mail : kitpulling.b-warehouse@i3plindia.com",
+  "printer": "Default",
+  "barcodePrinter": "Default",
+  "databaseLocation": "C:\\Projects\\clientprojects\\invoice-system\\dev-data\\database\\warehouse.db",
+  "backupFolder": "C:\\Projects\\clientprojects\\invoice-system\\dev-data\\backups",
+  "printsFolder": "C:\\Projects\\clientprojects\\invoice-system\\dev-data\\prints",
+  "logsFolder": "C:\\Projects\\clientprojects\\invoice-system\\dev-data\\logs",
+  "addressesList": [
+    "JABIL CURCUIT INDIA PVT LTD (EHTP UNIT)\nPLOT NO-B-26, Ranjangaon MIDC\nTal- Shirur, Dist- Pune 412209",
+    "Jabil",
+    "AS PER LIST"
+  ],
+  "suppliersList": [
+    "MAHADEV",
+    "I3PL"
+  ],
+  "scannersList": [
+    "PRASAD",
+    "AMOL",
+    "SHUBHAM"
+  ],
+  "verifiersList": [
+    "AMOL",
+    "PRASAD",
+    "SHUBHAM"
+  ],
+  "vehiclesList": [
+    "MH-12-QW-1234",
+    "MH-14-ER-5678"
+  ],
+  "defaultAddress": "Jabil",
+  "defaultSupplier": "MAHADEV",
+  "defaultScanner": "PRASAD",
+  "defaultVerifier": "AMOL",
+  "defaultVehicleNo": "",
+  "warehouseLocation": "F W H",
+  "lastCloudBackupTime": 1787344049529
+}

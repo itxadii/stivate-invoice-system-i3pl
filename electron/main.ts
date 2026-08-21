@@ -16,7 +16,7 @@ import {
   getDb,
   getPipelineStats
 } from './ipc/database';
-import { backupDatabase, uploadBackupToCloud } from './ipc/backup';
+import { backupDatabase, uploadBackupToCloud, checkAndRunPeriodicBackup } from './ipc/backup';
 import { printChallan, printBarcodes, printCombinedDispatch } from './ipc/printer';
 import { checkForUpdates, downloadUpdate, installUpdate, getUpdateInfo, initUpdater } from './updater';
 
@@ -165,6 +165,12 @@ app.whenReady().then(() => {
   } catch (err) {
     console.error('Failed to initialize database or run seed on startup:', err);
   }
+
+  // Initiate periodic 3-day backup check (for software running continuously)
+  checkAndRunPeriodicBackup();
+  setInterval(() => {
+    checkAndRunPeriodicBackup();
+  }, 4 * 60 * 60 * 1000);
 
   // Register IPC handlers
   ipcMain.handle('settings:load', () => {

@@ -16,6 +16,8 @@ export interface AppSettings {
   defaultScanner: string;
   defaultVerifier: string;
   defaultVehicleNo: string;
+  warehouseLocation?: string;
+  lastCloudBackupTime?: number;
 }
 
 export interface Dispatch {

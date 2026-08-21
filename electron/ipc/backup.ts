@@ -1,13 +1,35 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { loadSettings } from './settings';
+import { loadSettings, saveSettings } from './settings';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
+
+const THREE_DAYS_MS = 3 * 24 * 60 * 60 * 1000;
+
+const getWarehouseFolderName = (settings: any): string => {
+  const raw = (settings?.warehouseLocation || 'F_W_H').trim();
+  const safeName = raw.replace(/[\/\\:*?"<>|]/g, '_').replace(/\s+/g, '_');
+  return safeName || 'F_W_H';
+};
+
+const updateLastBackupTime = () => {
+  try {
+    const currentSettings = loadSettings();
+    saveSettings({
+      ...currentSettings,
+      lastCloudBackupTime: Date.now(),
+    });
+  } catch (err) {
+    console.error('Failed to record lastCloudBackupTime:', err);
+  }
+};
 
 export const backupDatabase = (): { success: boolean; message: string } => {
   try {
     const settings = loadSettings();
     const dbPath = settings.databaseLocation;
-    const backupDir = settings.backupFolder;
+    const baseBackupDir = settings.backupFolder;
+    const warehouseFolder = getWarehouseFolderName(settings);
+    const backupDir = path.join(baseBackupDir, warehouseFolder);
 
     if (!fs.existsSync(dbPath)) {
       return { success: false, message: 'Database file not found.' };
@@ -25,7 +47,7 @@ export const backupDatabase = (): { success: boolean; message: string } => {
     const HH = String(now.getHours()).padStart(2, '0');
     const Min = String(now.getMinutes()).padStart(2, '0');
     const Sec = String(now.getSeconds()).padStart(2, '0');
-    
+
     const filename = `backup_${YYYY}_${MM}_${DD}_${HH}_${Min}_${Sec}.db`;
     const destPath = path.join(backupDir, filename);
 
@@ -35,7 +57,7 @@ export const backupDatabase = (): { success: boolean; message: string } => {
     // Prune backups (keep latest 30)
     pruneBackups(backupDir);
 
-    return { success: true, message: `Backup saved: ${filename}` };
+    return { success: true, message: `Backup saved in ${warehouseFolder}: ${filename}` };
   } catch (err: any) {
     console.error('Backup failed:', err);
     return { success: false, message: err.message || 'Backup process failed' };
@@ -75,6 +97,7 @@ export const uploadBackupToCloud = async (): Promise<{ success: boolean; message
   try {
     const settings = loadSettings();
     const dbPath = settings.databaseLocation;
+    const warehouseFolder = getWarehouseFolderName(settings);
 
     if (!fs.existsSync(dbPath)) {
       return { success: false, message: 'Database file not found.' };
@@ -89,7 +112,7 @@ export const uploadBackupToCloud = async (): Promise<{ success: boolean; message
     const HH = String(now.getHours()).padStart(2, '0');
     const Min = String(now.getMinutes()).padStart(2, '0');
     const Sec = String(now.getSeconds()).padStart(2, '0');
-    const filename = `backups/backup_${YYYY}_${MM}_${DD}_${HH}_${Min}_${Sec}.db`;
+    const filename = `backups/${warehouseFolder}/backup_${YYYY}_${MM}_${DD}_${HH}_${Min}_${Sec}.db`;
 
     // Configure S3 client with the credentials provided
     const s3Client = new S3Client({
@@ -107,13 +130,15 @@ export const uploadBackupToCloud = async (): Promise<{ success: boolean; message
     });
 
     await s3Client.send(command);
+    updateLastBackupTime();
 
-    return { success: true, message: `Backup uploaded to cloud successfully: ${filename}` };
+    return { success: true, message: `Backup uploaded to cloud (${warehouseFolder}) successfully: ${filename}` };
   } catch (err: any) {
     console.error('Cloud upload primary failed, trying fallback region:', err);
     try {
       const settings = loadSettings();
       const dbPath = settings.databaseLocation;
+      const warehouseFolder = getWarehouseFolderName(settings);
       const fileBuffer = fs.readFileSync(dbPath);
 
       const now = new Date();
@@ -123,7 +148,7 @@ export const uploadBackupToCloud = async (): Promise<{ success: boolean; message
       const HH = String(now.getHours()).padStart(2, '0');
       const Min = String(now.getMinutes()).padStart(2, '0');
       const Sec = String(now.getSeconds()).padStart(2, '0');
-      const filename = `backups/backup_${YYYY}_${MM}_${DD}_${HH}_${Min}_${Sec}.db`;
+      const filename = `backups/${warehouseFolder}/backup_${YYYY}_${MM}_${DD}_${HH}_${Min}_${Sec}.db`;
 
       const s3Client = new S3Client({
         region: 'us-east-1', // Fallback region
@@ -140,10 +165,37 @@ export const uploadBackupToCloud = async (): Promise<{ success: boolean; message
       });
 
       await s3Client.send(command);
-      return { success: true, message: `Backup uploaded to cloud successfully: ${filename}` };
+      updateLastBackupTime();
+      return { success: true, message: `Backup uploaded to cloud (${warehouseFolder}) successfully: ${filename}` };
     } catch (fallbackErr: any) {
       console.error('Cloud upload fallback failed:', fallbackErr);
       return { success: false, message: `Cloud upload failed: ${fallbackErr.message || fallbackErr}` };
     }
+  }
+};
+
+export const checkAndRunPeriodicBackup = async (): Promise<{ ran: boolean; message?: string }> => {
+  try {
+    const settings = loadSettings();
+    const lastTime = settings.lastCloudBackupTime || 0;
+    const now = Date.now();
+
+    if (now - lastTime >= THREE_DAYS_MS) {
+      console.log('3-Day periodic auto backup triggered (software running continuously)...');
+      const localRes = backupDatabase();
+      console.log('Periodic local backup result:', localRes.message);
+
+      const cloudRes = await uploadBackupToCloud();
+      console.log('Periodic cloud backup result:', cloudRes.message);
+
+      return { ran: true, message: cloudRes.message };
+    } else {
+      const remainingHours = Math.round((THREE_DAYS_MS - (now - lastTime)) / (1000 * 60 * 60));
+      console.log(`Periodic backup check: Next auto cloud backup due in ~${remainingHours} hours.`);
+      return { ran: false };
+    }
+  } catch (err: any) {
+    console.error('Periodic backup check failed:', err);
+    return { ran: false, message: err.message };
   }
 };

@@ -473,6 +473,21 @@ export const Settings: React.FC<SettingsProps> = ({ onSettingsSaved }) => {
               />
             </div>
 
+            <div className="space-y-1 md:col-span-2">
+              <label className="text-xs font-bold text-slate-500 uppercase">Warehouse Location / Header Prefix</label>
+              <input
+                type="text"
+                name="warehouseLocation"
+                value={settings.warehouseLocation || ''}
+                onChange={handleChange}
+                placeholder="e.g. F W H or FORWARD WAREHOUSE or MAIN WAREHOUSE"
+                className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-slate-50 focus:outline-none focus:border-[#4BB8FA] focus:bg-white transition-colors font-medium"
+              />
+              <p className="text-[11px] text-slate-400">
+                Sets the location prefix printed on Challan PDF headers (e.g. <strong>{settings.warehouseLocation || 'F W H'}</strong> TO [Consignee Name]).
+              </p>
+            </div>
+
             <div className="space-y-1">
               <label className="text-xs font-bold text-slate-500 uppercase">Default Document Printer</label>
               <input

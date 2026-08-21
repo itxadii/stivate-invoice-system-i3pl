@@ -114,7 +114,33 @@ const getLogoImage = async (pdfDoc: PDFDocument) => {
   return null;
 };
 
-const buildChallanPage = (pdfDoc: PDFDocument, dispatch: any, font: any, fontBold: any, logo: any) => {
+const wrapText = (text: string, maxChars: number): string[] => {
+  if (!text || text.length <= maxChars) return [text || ''];
+  const words = text.split(' ');
+  const lines: string[] = [];
+  let currentLine = '';
+
+  for (const word of words) {
+    if ((currentLine + ' ' + word).trim().length <= maxChars) {
+      currentLine = (currentLine + ' ' + word).trim();
+    } else {
+      if (currentLine) lines.push(currentLine);
+      currentLine = word;
+    }
+  }
+  if (currentLine) lines.push(currentLine);
+  return lines;
+};
+
+const getConsigneeDisplayName = (addressStr?: string): string => {
+  if (!addressStr || !addressStr.trim()) {
+    return 'AS PER LIST';
+  }
+  const firstLine = addressStr.split('\n')[0].trim().toUpperCase();
+  return firstLine || 'AS PER LIST';
+};
+
+const buildChallanPage = (pdfDoc: PDFDocument, dispatch: any, font: any, fontBold: any, logo: any, settings?: any) => {
   const page = pdfDoc.addPage([841.89, 595.276]);
   const { width, height } = page.getSize();
   const margin = 40;
@@ -193,22 +219,21 @@ const buildChallanPage = (pdfDoc: PDFDocument, dispatch: any, font: any, fontBol
   const addressLines = ((dispatch.address || 'AS PER LIST') as string).split('\n');
   let addrY = yCursor - 27;
   for (const line of addressLines) {
-    page.drawText(line, { x: margin + 10, y: addrY, size: 10, font, color: rgb(0.2, 0.2, 0.2) });
+    page.drawText(line, { x: margin + 10, y: addrY, size: 9.5, font, color: rgb(0.2, 0.2, 0.2) });
     addrY -= 11;
   }
 
-  let plantName = 'JABIL PLANT';
-  const rawAddrLower = (dispatch.address || '').toLowerCase();
-  if (rawAddrLower.includes('jabil')) {
-    plantName = 'JABIL PLANT';
-  } else if (rawAddrLower.includes('ericsson')) {
-    plantName = 'ERICSSON PLANT';
-  } else {
-    plantName = (dispatch.address || 'AS PER LIST').split('\n')[0].substring(0, 20).toUpperCase();
+  const whPrefix = (settings?.warehouseLocation || 'F W H').trim().toUpperCase();
+  const consigneeName = getConsigneeDisplayName(dispatch.address);
+  const fwhText = `${whPrefix} TO ${consigneeName}`;
+  const fwhLines = wrapText(fwhText, 32);
+  let fwhY = yCursor - 22;
+  for (const fLine of fwhLines) {
+    page.drawText(fLine, { x: rightX, y: fwhY, size: 10.5, font: fontBold, color: rgb(0.1, 0.1, 0.1) });
+    fwhY -= 13;
   }
 
-  page.drawText(`F W H TO ${plantName}`, { x: rightX, y: yCursor - 25, size: 12, font: fontBold, color: rgb(0.1, 0.1, 0.1) });
-  page.drawText(`VEHICLE NO: ${dispatch.vehicle_no || ''}`, { x: rightX, y: yCursor - 55, size: 11.5, font: fontBold, color: rgb(0.1, 0.1, 0.1) });
+  page.drawText(`VEHICLE NO: ${dispatch.vehicle_no || ''}`, { x: rightX, y: yCursor - 62, size: 11, font: fontBold, color: rgb(0.1, 0.1, 0.1) });
 
   yCursor -= 90;
 
@@ -276,8 +301,8 @@ const buildChallanPage = (pdfDoc: PDFDocument, dispatch: any, font: any, fontBol
 };
 
 const buildBarcodePages = (pdfDoc: PDFDocument, items: any[], font: any, fontBold: any, logo: any, dispatch?: any) => {
-  const margin = 30;
-  const printableWidth = 781.89;
+  const margin = 25;
+  const printableWidth = 791.89;
 
   let dcNo = dispatch?.dc_no || 'Draft';
   let rawDateStr = dispatch?.date || new Date().toISOString();
@@ -296,32 +321,18 @@ const buildBarcodePages = (pdfDoc: PDFDocument, items: any[], font: any, fontBol
   } catch (e) {}
 
   let palletsCount = dispatch?.total_pallets || 1;
-  let plantName = 'JABIL PLANT';
+  let consigneeAddrName = getConsigneeDisplayName(dispatch?.address);
 
-  if (dispatch?.address) {
-    const rawAddrLower = (dispatch.address || '').toLowerCase();
-    if (rawAddrLower.includes('jabil')) {
-      plantName = 'JABIL PLANT';
-    } else if (rawAddrLower.includes('ericsson')) {
-      plantName = 'ERICSSON PLANT';
-    } else {
-      plantName = (dispatch.address || 'AS PER LIST').split('\n')[0].substring(0, 20).toUpperCase();
-    }
-  } else if (items.length > 0 && items[0].dispatch_id) {
+  if (items.length > 0 && items[0].dispatch_id) {
     try {
       const { getDispatch } = require('./database');
       const dbDisp = getDispatch(items[0].dispatch_id);
       if (dbDisp) {
-        dcNo = dbDisp.dc_no;
-        dateStr = dbDisp.date;
-        palletsCount = dbDisp.total_pallets;
-        const rawAddrLower = (dbDisp.address || '').toLowerCase();
-        if (rawAddrLower.includes('jabil')) {
-          plantName = 'JABIL PLANT';
-        } else if (rawAddrLower.includes('ericsson')) {
-          plantName = 'ERICSSON PLANT';
-        } else {
-          plantName = (dbDisp.address || 'AS PER LIST').split('\n')[0].substring(0, 20).toUpperCase();
+        if (!dcNo || dcNo === 'Draft') dcNo = dbDisp.dc_no;
+        if (!dateStr || dateStr === rawDateStr) dateStr = dbDisp.date;
+        palletsCount = dbDisp.total_pallets || palletsCount;
+        if (!dispatch?.address && dbDisp.address) {
+          consigneeAddrName = getConsigneeDisplayName(dbDisp.address);
         }
       }
     } catch (err) {
@@ -334,80 +345,91 @@ const buildBarcodePages = (pdfDoc: PDFDocument, items: any[], font: any, fontBol
 
     p.drawRectangle({
       x: margin,
-      y: yCursor - 40,
+      y: yCursor - 30,
       width: printableWidth,
-      height: 40,
+      height: 30,
       borderColor: rgb(0.8, 0.8, 0.8),
       borderWidth: 1,
     });
 
     let titleX = margin + 10;
     if (logo) {
-      p.drawImage(logo, { x: margin + 10, y: yCursor - 35, width: 60, height: 30 });
-      titleX = margin + 80;
+      p.drawImage(logo, { x: margin + 10, y: yCursor - 26, width: 50, height: 22 });
+      titleX = margin + 70;
     }
-    p.drawText('PULL LIST BARCODE SHEET', { x: titleX, y: yCursor - 27, size: 15, font: fontBold, color: rgb(0.1, 0.1, 0.1) });
+    p.drawText('PULL LIST BARCODE SHEET', { x: titleX, y: yCursor - 21, size: 13.5, font: fontBold, color: rgb(0.1, 0.1, 0.1) });
+
+    yCursor -= 30;
 
     p.drawRectangle({
       x: margin,
-      y: yCursor - 70,
+      y: yCursor - 26,
       width: printableWidth,
-      height: 30,
+      height: 26,
       borderColor: rgb(0.8, 0.8, 0.8),
       borderWidth: 1,
       color: rgb(0.96, 0.97, 0.98),
     });
 
-    p.drawText(`DC NO: ${dcNo}`, { x: margin + 15, y: yCursor - 60, size: 10.5, font: fontBold });
-    p.drawText(`NO OF PALLETS: ${palletsCount}`, { x: margin + 200, y: yCursor - 60, size: 10.5, font: fontBold });
-    p.drawText(`ADDRESS: ${plantName}`, { x: margin + 370, y: yCursor - 60, size: 10.5, font: fontBold });
-    p.drawText(`DATE & TIME: ${dateStr}`, { x: margin + 560, y: yCursor - 60, size: 10, font: fontBold });
+    // Subheader Box Positions (no overlaps!)
+    p.drawText(`DC NO: ${dcNo}`, { x: margin + 10, y: yCursor - 17, size: 9.5, font: fontBold });
+    p.drawText(`NO OF PALLETS: ${palletsCount}`, { x: margin + 195, y: yCursor - 17, size: 9.5, font: fontBold });
 
-    yCursor -= 70;
+    // Dynamic Sizing for Address to ensure zero overlap with Date & Time
+    const safeAddr = consigneeAddrName.length > 45 ? consigneeAddrName.substring(0, 42) + '...' : consigneeAddrName;
+    let addrFontSize = 9.5;
+    if (safeAddr.length > 35) addrFontSize = 7.5;
+    else if (safeAddr.length > 25) addrFontSize = 8.5;
+
+    p.drawText(`ADDRESS: ${safeAddr}`, { x: margin + 335, y: yCursor - 17, size: addrFontSize, font: fontBold });
+    p.drawText(`DATE & TIME: ${dateStr}`, { x: margin + 575, y: yCursor - 17, size: 9, font: fontBold });
+
+    yCursor -= 26;
 
     p.drawRectangle({
       x: margin,
-      y: yCursor - 20,
+      y: yCursor - 18,
       width: printableWidth,
-      height: 20,
+      height: 18,
       color: rgb(0.92, 0.92, 0.92),
       borderColor: rgb(0.8, 0.8, 0.8),
       borderWidth: 1,
     });
 
     const colHeaders = ['S.No', 'ID NUMBER', 'Pull List No', 'Kit Type', 'Workcell', 'Parts', 'Pull List Barcode'];
-    const colWidths = [40, 90, 150, 80, 120, 60, 240];
+    const colWidths = [35, 85, 150, 80, 130, 50, 261.89];
     let xCursor = margin;
     for (let i = 0; i < colHeaders.length; i++) {
       p.drawText(colHeaders[i], {
-        x: xCursor + 8,
-        y: yCursor - 14,
-        size: 11,
+        x: xCursor + 6,
+        y: yCursor - 13,
+        size: 9.5,
         font: fontBold,
         color: rgb(0.1, 0.1, 0.1),
       });
       xCursor += colWidths[i];
     }
 
-    p.drawText(`Page ${pageIndex} of ${totalPages}`, { x: 841.89 - margin - 80, y: 15, size: 8, font, color: rgb(0.6, 0.6, 0.6) });
+    p.drawText(`Page ${pageIndex} of ${totalPages}`, { x: 841.89 - margin - 70, y: 10, size: 8, font, color: rgb(0.6, 0.6, 0.6) });
   };
 
-  const rowsPerPage = 8;
+  // Capacity: 15 Pull Lists per Page
+  const rowsPerPage = 15;
   const totalPages = Math.max(1, Math.ceil(items.length / rowsPerPage));
   let currentItemIdx = 0;
 
   for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
     const page = pdfDoc.addPage([841.89, 595.276]);
     const { height } = page.getSize();
-    let yCursor = height - margin - 90;
-    const colWidths = [40, 90, 150, 80, 120, 60, 240];
+    let yCursor = height - margin - 74;
+    const colWidths = [35, 85, 150, 80, 130, 50, 261.89];
 
     drawHeaderAndTableHeaders(page, pageNum, totalPages);
 
     const pageLimit = Math.min(currentItemIdx + rowsPerPage, items.length);
     for (let idx = currentItemIdx; idx < pageLimit; idx++) {
       const item = items[idx];
-      const rowHeight = 50;
+      const rowHeight = 28;
 
       if (idx % 2 === 1) {
         page.drawRectangle({
@@ -450,9 +472,9 @@ const buildBarcodePages = (pdfDoc: PDFDocument, items: any[], font: any, fontBol
 
       for (let i = 0; i < vals.length; i++) {
         page.drawText(vals[i], {
-          x: xCursor + 8,
-          y: yCursor - 30,
-          size: i === 2 ? 12 : 11,
+          x: xCursor + 6,
+          y: yCursor - 18,
+          size: i === 2 ? 9.5 : 9,
           font: i === 2 ? fontBold : font,
           color: rgb(0.2, 0.2, 0.2),
         });
@@ -460,7 +482,7 @@ const buildBarcodePages = (pdfDoc: PDFDocument, items: any[], font: any, fontBol
       }
 
       try {
-        drawBarcode(page, cleanPullListNo, xCursor + 40, yCursor - 41, 32, 0.52, 1.3);
+        drawBarcode(page, cleanPullListNo, xCursor + 30, yCursor - 23, 19, 0.45, 1.1);
       } catch (err) {
         console.error(`Failed to draw barcode for ${cleanPullListNo}:`, err);
       }
@@ -479,7 +501,7 @@ export const printChallan = async (dispatch: any, _items: any[]): Promise<{ succ
     const fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
     const logo = await getLogoImage(pdfDoc);
 
-    buildChallanPage(pdfDoc, dispatch, font, fontBold, logo);
+    buildChallanPage(pdfDoc, dispatch, font, fontBold, logo, settings);
 
     const printsDir = settings.printsFolder;
     if (!fs.existsSync(printsDir)) {
@@ -561,7 +583,7 @@ export const printCombinedDispatch = async (dispatch: any, items: any[]): Promis
     const fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
     const logo = await getLogoImage(pdfDoc);
 
-    buildChallanPage(pdfDoc, dispatch, font, fontBold, logo);
+    buildChallanPage(pdfDoc, dispatch, font, fontBold, logo, settings);
     buildBarcodePages(pdfDoc, items, font, fontBold, logo, dispatch);
 
     const printsDir = settings.printsFolder;

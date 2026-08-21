@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { databaseService, settingsService } from '../services/ipc';
 import type { Dispatch, PipelineStats } from '../types';
-import { Play, CheckCircle, Clock, ClipboardList, Eye, ArrowRight, Hourglass } from 'lucide-react';
+import { Play, CheckCircle, Clock, ClipboardList, Eye, ArrowRight, Hourglass, Search, X, Plus, User } from 'lucide-react';
 import { Modal } from '../components/Modal';
 
 interface DispatchPipelineProps {
@@ -52,6 +52,11 @@ export const DispatchPipeline: React.FC<DispatchPipelineProps> = ({
   const [activeDispatches, setActiveDispatches] = useState<(Dispatch & { loadedCount: number })[]>([]);
   const [loading, setLoading] = useState(true);
   const [settings, setSettings] = useState<any>(null);
+
+  // Search & Filter State
+  const [searchQuery, setSearchQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'loading' | 'ready'>('all');
+  const [selectedSupervisor, setSelectedSupervisor] = useState<string>('all');
 
   // New Dispatch Popup Modal State
   const [isNewModalOpen, setIsNewModalOpen] = useState(false);
@@ -217,6 +222,36 @@ export const DispatchPipeline: React.FC<DispatchPipelineProps> = ({
     }
   ];
 
+  const supervisorList = Array.from(
+    new Set([
+      ...(settings?.suppliersList || []),
+      ...activeDispatches.map((d) => d.supplier_name).filter(Boolean),
+    ])
+  );
+
+  const filteredDispatches = activeDispatches.filter((d) => {
+    if (statusFilter !== 'all' && d.status !== statusFilter) {
+      return false;
+    }
+
+    if (selectedSupervisor !== 'all' && (d.supplier_name || '').toLowerCase() !== selectedSupervisor.toLowerCase()) {
+      return false;
+    }
+
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase().trim();
+      const matchDc = (d.dc_no || '').toLowerCase().includes(q);
+      const matchVehicle = (d.vehicle_no || '').toLowerCase().includes(q);
+      const matchSupervisor = (d.supplier_name || '').toLowerCase().includes(q);
+      const matchAddress = (d.address || '').toLowerCase().includes(q);
+      const matchParticular = (d.particular || '').toLowerCase().includes(q);
+
+      return matchDc || matchVehicle || matchSupervisor || matchAddress || matchParticular;
+    }
+
+    return true;
+  });
+
   return (
     <div className="space-y-6">
       {/* Top Statistic Cards */}
@@ -240,19 +275,100 @@ export const DispatchPipeline: React.FC<DispatchPipelineProps> = ({
         })}
       </div>
 
-      {/* Main Pipeline Table */}
+      {/* Main Pipeline Table with Search & Filter Bar */}
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
-        <div className="p-5 border-b border-slate-100 flex items-center justify-between flex-wrap gap-4">
-          <div>
-            <h3 className="text-md font-bold text-slate-800 uppercase tracking-wide">Active Dispatch Pipeline</h3>
-            <p className="text-xs text-slate-400">Manage, edit, and print loading or ready shipments</p>
+        {/* Header & Controls Bar */}
+        <div className="p-5 border-b border-slate-100 space-y-4">
+          <div className="flex items-center justify-between flex-wrap gap-4">
+            <div>
+              <h3 className="text-md font-bold text-slate-800 uppercase tracking-wide flex items-center gap-2">
+                <span>Active Dispatch Pipeline</span>
+                <span className="text-xs px-2.5 py-0.5 bg-blue-50 text-blue-700 font-bold rounded-full border border-blue-100">
+                  {filteredDispatches.length} {filteredDispatches.length === 1 ? 'Dispatch' : 'Dispatches'}
+                </span>
+              </h3>
+              <p className="text-xs text-slate-400">Manage, edit, scan, and print loading or ready shipments</p>
+            </div>
+
+            <button
+              onClick={handleOpenNewModal}
+              className="flex items-center gap-1.5 px-4 py-2 bg-[#4BB8FA] hover:bg-[#35a0dc] text-slate-900 rounded-lg text-xs font-bold transition-colors cursor-pointer shadow-sm"
+            >
+              <Plus size={15} />
+              <span>Create New Dispatch</span>
+            </button>
           </div>
-          <button
-            onClick={handleOpenNewModal}
-            className="px-4 py-2 bg-[#4BB8FA] hover:bg-[#35a0dc] text-slate-900 rounded-lg text-xs font-bold transition-colors cursor-pointer"
-          >
-            Create New Dispatch
-          </button>
+
+          {/* Search, Supervisor & Status Filters */}
+          <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-slate-100">
+            {/* Search Input Box */}
+            <div className="relative flex-1 min-w-[240px] max-w-md">
+              <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input
+                type="text"
+                placeholder="Search Vehicle No, DC No, Supervisor Name, Address..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full pl-9 pr-8 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium text-slate-800 placeholder-slate-400 focus:outline-none focus:border-[#4BB8FA] focus:bg-white transition-all"
+              />
+              {searchQuery && (
+                <button
+                  onClick={() => setSearchQuery('')}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-0.5 rounded-full hover:bg-slate-200 transition-colors cursor-pointer"
+                >
+                  <X size={13} />
+                </button>
+              )}
+            </div>
+
+            {/* Filter Controls */}
+            <div className="flex flex-wrap items-center gap-2">
+              {/* Supervisor Filter Dropdown */}
+              <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5">
+                <User size={14} className="text-slate-400" />
+                <select
+                  value={selectedSupervisor}
+                  onChange={(e) => setSelectedSupervisor(e.target.value)}
+                  className="bg-transparent border-none text-xs focus:outline-none text-slate-700 font-bold cursor-pointer"
+                >
+                  <option value="all">All Supervisors</option>
+                  {supervisorList.map((sup, idx) => (
+                    <option key={idx} value={sup}>{sup}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Status Filter Pills */}
+              <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-lg border border-slate-200/80">
+                {(['all', 'loading', 'ready'] as const).map((st) => (
+                  <button
+                    key={st}
+                    onClick={() => setStatusFilter(st)}
+                    className={`px-3 py-1 rounded-md text-xs font-bold transition-all capitalize cursor-pointer ${
+                      statusFilter === st
+                        ? 'bg-white text-slate-900 shadow-sm'
+                        : 'text-slate-500 hover:text-slate-800'
+                    }`}
+                  >
+                    {st === 'all' ? 'All Status' : st}
+                  </button>
+                ))}
+              </div>
+
+              {(searchQuery || statusFilter !== 'all' || selectedSupervisor !== 'all') && (
+                <button
+                  onClick={() => {
+                    setSearchQuery('');
+                    setStatusFilter('all');
+                    setSelectedSupervisor('all');
+                  }}
+                  className="text-xs text-rose-600 font-bold hover:underline px-2 py-1 cursor-pointer"
+                >
+                  Clear Filters
+                </button>
+              )}
+            </div>
+          </div>
         </div>
 
         <div className="overflow-x-auto">
@@ -263,6 +379,21 @@ export const DispatchPipeline: React.FC<DispatchPipelineProps> = ({
           ) : activeDispatches.length === 0 ? (
             <div className="py-12 text-center text-sm text-slate-400 font-medium">
               No active shipments in pipeline. Create a new dispatch to begin loading.
+            </div>
+          ) : filteredDispatches.length === 0 ? (
+            <div className="py-12 text-center space-y-2">
+              <p className="text-sm text-slate-500 font-medium">
+                No active dispatches match your search query "{searchQuery}".
+              </p>
+              <button
+                onClick={() => {
+                  setSearchQuery('');
+                  setStatusFilter('all');
+                }}
+                className="text-xs text-blue-600 font-bold hover:underline cursor-pointer"
+              >
+                Clear all search filters
+              </button>
             </div>
           ) : (
             <table className="min-w-full divide-y divide-slate-200">
@@ -278,7 +409,7 @@ export const DispatchPipeline: React.FC<DispatchPipelineProps> = ({
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 bg-white">
-                {activeDispatches.map((d) => {
+                {filteredDispatches.map((d) => {
                   const loaded = d.loadedCount;
                   const expected = Math.max(d.total_pallets || 1, loaded);
                   const progressPct = Math.min(100, Math.round((loaded / expected) * 100));

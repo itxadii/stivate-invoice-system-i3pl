@@ -24,6 +24,8 @@ export interface AppSettings {
   defaultScanner: string;
   defaultVerifier: string;
   defaultVehicleNo: string;
+  warehouseLocation?: string;
+  lastCloudBackupTime?: number;
 }
 
 /**
@@ -140,6 +142,8 @@ export const getDefaultSettings = (): AppSettings => {
     defaultVerifier: 'AMOL',
 
     defaultVehicleNo: '',
+
+    warehouseLocation: 'F W H',
   };
 };
 
