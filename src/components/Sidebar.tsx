@@ -22,13 +22,14 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, onClo
       case 'dashboard':
         return 0;
       case 'pipeline':
+      case 'new-dispatch':
         return 90;
       case 'completed':
         return 180;
       case 'reports':
         return 270;
       case 'settings':
-        return 360;
+        return 0;
       default:
         return 0;
     }

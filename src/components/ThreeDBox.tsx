@@ -39,10 +39,10 @@ export const ThreeDBox: React.FC<ThreeDBoxProps> = ({ size = 125, rotationY = 0,
           </div>
         </div>
 
-        {/* RIGHT FACE (90 deg) -> DISPATCH PIPELINE */}
+        {/* RIGHT FACE (-90 deg / 270 deg) -> DISPATCH PIPELINE */}
         <div
           className="absolute inset-0 border border-[#D35400]/40 bg-gradient-to-br from-[#E59866] via-[#DC7633] to-[#CA6F1E] shadow-md rounded-sm flex items-center justify-center p-2"
-          style={{ transform: `rotateY(90deg) translateZ(${half}px)` }}
+          style={{ transform: `rotateY(-90deg) translateZ(${half}px)` }}
         >
           <div className="p-3 bg-[#5B2C06]/15 rounded-xl border border-[#5B2C06]/20 shadow-inner flex items-center justify-center">
             <Truck size={48} className="text-[#421D03] stroke-[1.8]" />
@@ -59,10 +59,10 @@ export const ThreeDBox: React.FC<ThreeDBoxProps> = ({ size = 125, rotationY = 0,
           </div>
         </div>
 
-        {/* LEFT FACE (270 deg / -90 deg) -> REPORTS & ANALYTICS */}
+        {/* LEFT FACE (90 deg) -> REPORTS & ANALYTICS */}
         <div
           className="absolute inset-0 border border-[#D35400]/40 bg-gradient-to-br from-[#DC7633] via-[#CA6F1E] to-[#BA4A00] shadow-md rounded-sm flex items-center justify-center p-2"
-          style={{ transform: `rotateY(-90deg) translateZ(${half}px)` }}
+          style={{ transform: `rotateY(90deg) translateZ(${half}px)` }}
         >
           <div className="p-3 bg-[#5B2C06]/15 rounded-xl border border-[#5B2C06]/20 shadow-inner flex items-center justify-center">
             <BarChart3 size={48} className="text-[#421D03] stroke-[1.8]" />

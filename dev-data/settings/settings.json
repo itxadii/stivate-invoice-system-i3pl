@@ -30,7 +30,8 @@
   "vehiclesList": [
     "MH-12-QW-1234",
     "MH-14-ER-5678",
-    "MH-151515"
+    "MH-151515",
+    "HKJ"
   ],
   "vehicleSizesList": [
     "32 ft",
@@ -44,5 +45,5 @@
   "defaultVehicleNo": "MH-12-QW-1234",
   "defaultVehicleSize": "32 ft",
   "warehouseLocation": "F Warehouse",
-  "lastCloudBackupTime": 1787832550862
+  "lastCloudBackupTime": 1787835815142
 }

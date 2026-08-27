@@ -89,17 +89,79 @@
   animation: strokeDraw 0.5s cubic-bezier(0.65, 0, 0.45, 1) forwards;
 }
 
+@keyframes gpayFlash {
+  0% {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  30% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes gpayRipple {
+  0% {
+    transform: scale(0.6);
+    opacity: 0.8;
+  }
+  100% {
+    transform: scale(2.2);
+    opacity: 0;
+  }
+}
+
+@keyframes gpayPop {
+  0% {
+    transform: scale(0.3);
+    opacity: 0;
+  }
+  60% {
+    transform: scale(1.15);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.animate-gpay-flash {
+  animation: gpayFlash 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-gpay-ripple-1 {
+  animation: gpayRipple 1.6s cubic-bezier(0.2, 0.8, 0.2, 1) infinite;
+}
+
+.animate-gpay-ripple-2 {
+  animation: gpayRipple 1.6s cubic-bezier(0.2, 0.8, 0.2, 1) 0.5s infinite;
+}
+
+.animate-gpay-pop {
+  animation: gpayPop 0.55s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
 /* Reduced Motion Override */
 @media (prefers-reduced-motion: reduce) {
   .animate-truck-move,
   .animate-truck-bounce,
   .animate-pulse-scale,
   .animate-shake,
-  .animate-stroke-draw {
+  .animate-stroke-draw,
+  .animate-gpay-flash,
+  .animate-gpay-ripple-1,
+  .animate-gpay-ripple-2,
+  .animate-gpay-pop {
     animation: none !important;
     transition: none !important;
     stroke-dashoffset: 0 !important;
     transform: none !important;
   }
 }
+
 
