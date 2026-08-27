@@ -18,12 +18,14 @@ export interface AppSettings {
   scannersList: string[];
   verifiersList: string[];
   vehiclesList: string[];
+  vehicleSizesList?: string[];
 
   defaultAddress: string;
   defaultSupplier: string;
   defaultScanner: string;
   defaultVerifier: string;
   defaultVehicleNo: string;
+  defaultVehicleSize?: string;
   warehouseLocation?: string;
   lastCloudBackupTime?: number;
 }
@@ -133,6 +135,12 @@ export const getDefaultSettings = (): AppSettings => {
       'MH-14-ER-5678',
     ],
 
+    vehicleSizesList: [
+      '32 ft',
+      '20 ft',
+      '10 ft',
+    ],
+
     defaultAddress,
 
     defaultSupplier: 'MAHADEV',
@@ -142,6 +150,8 @@ export const getDefaultSettings = (): AppSettings => {
     defaultVerifier: 'AMOL',
 
     defaultVehicleNo: '',
+
+    defaultVehicleSize: '32 ft',
 
     warehouseLocation: 'F W H',
   };

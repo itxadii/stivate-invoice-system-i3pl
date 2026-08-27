@@ -26,3 +26,80 @@
   }
 }
 
+/* Animation Keyframes for Dispatch System */
+
+@keyframes truckMove {
+  0% {
+    transform: translateX(0);
+  }
+  100% {
+    transform: translateX(calc(100% - 3.5rem));
+  }
+}
+
+@keyframes truckBounce {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-3px);
+  }
+}
+
+@keyframes strokeDraw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes pulseScale {
+  0%, 100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.08);
+  }
+}
+
+@keyframes subtleShake {
+  0%, 100% { transform: translateX(0); }
+  20%, 60% { transform: translateX(-4px); }
+  40%, 80% { transform: translateX(4px); }
+}
+
+.animate-truck-move {
+  animation: truckMove 1s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+.animate-truck-bounce {
+  animation: truckBounce 0.25s ease-in-out infinite;
+}
+
+.animate-pulse-scale {
+  animation: pulseScale 0.4s ease-in-out;
+}
+
+.animate-shake {
+  animation: subtleShake 0.4s ease-in-out;
+}
+
+.animate-stroke-draw {
+  stroke-dasharray: 50;
+  stroke-dashoffset: 50;
+  animation: strokeDraw 0.5s cubic-bezier(0.65, 0, 0.45, 1) forwards;
+}
+
+/* Reduced Motion Override */
+@media (prefers-reduced-motion: reduce) {
+  .animate-truck-move,
+  .animate-truck-bounce,
+  .animate-pulse-scale,
+  .animate-shake,
+  .animate-stroke-draw {
+    animation: none !important;
+    transition: none !important;
+    stroke-dashoffset: 0 !important;
+    transform: none !important;
+  }
+}
+

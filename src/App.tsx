@@ -104,24 +104,56 @@ function App() {
     }
   };
 
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState<boolean>(false);
+
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-slate-100 font-sans">
-      {/* Sidebar */}
-      <Sidebar activeTab={activeTab} setActiveTab={(tab) => {
-        if (tab !== 'new-dispatch') {
-          setEditDispatchId(null);
-        }
-        setPreviousTab(activeTab);
-        setActiveTab(tab);
-      }} />
+    <div className="flex h-screen w-screen overflow-hidden bg-slate-100 font-sans relative">
+      {/* Desktop Sidebar */}
+      <div className="hidden md:flex h-full">
+        <Sidebar activeTab={activeTab} setActiveTab={(tab) => {
+          if (tab !== 'new-dispatch') {
+            setEditDispatchId(null);
+          }
+          setPreviousTab(activeTab);
+          setActiveTab(tab);
+        }} />
+      </div>
+
+      {/* Mobile Drawer Backdrop & Sidebar */}
+      {isMobileSidebarOpen && (
+        <div className="fixed inset-0 z-50 flex md:hidden">
+          <div 
+            className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs transition-opacity"
+            onClick={() => setIsMobileSidebarOpen(false)}
+          />
+          <div className="relative flex-1 max-w-xs w-full bg-white h-full z-50 shadow-2xl">
+            <Sidebar
+              activeTab={activeTab}
+              setActiveTab={(tab) => {
+                if (tab !== 'new-dispatch') {
+                  setEditDispatchId(null);
+                }
+                setPreviousTab(activeTab);
+                setActiveTab(tab);
+                setIsMobileSidebarOpen(false);
+              }}
+              onCloseMobile={() => setIsMobileSidebarOpen(false)}
+            />
+          </div>
+        </div>
+      )}
 
       {/* Main Content Area */}
-      <div className="flex-1 flex flex-col h-full overflow-hidden">
+      <div className="flex-1 flex flex-col h-full overflow-hidden min-w-0">
         {/* Header */}
-        <Header title={getTabTitle()} companyName={settings.companyName} />
+        <Header 
+          title={getTabTitle()} 
+          companyName={settings.companyName} 
+          onToggleMobileSidebar={() => setIsMobileSidebarOpen(!isMobileSidebarOpen)}
+        />
 
         {/* Content Body */}
-        <main className="flex-1 overflow-y-auto p-6">
+        <main className="flex-1 overflow-y-auto p-3 sm:p-6">
           {activeTab === 'dashboard' && (
             <Dashboard 
               setActiveTab={(tab) => {

@@ -3,6 +3,8 @@ import { settingsService, backupService, updaterService } from '../services/ipc'
 import type { AppSettings } from '../types';
 import { Save, Database, HardDriveDownload, Sparkles, FolderOpen, RefreshCcw, Cloud, BookOpen, HelpCircle, Keyboard, ShieldCheck, FileText, Lock } from 'lucide-react';
 import { Modal } from '../components/Modal';
+import { AnimatedStatusButton } from '../components/animations';
+import type { ButtonStatus } from '../components/animations';
 
 interface SettingsProps {
   onSettingsSaved: () => void;
@@ -34,6 +36,7 @@ export const Settings: React.FC<SettingsProps> = ({ onSettingsSaved }) => {
   const [scannersRaw, setScannersRaw] = useState('');
   const [verifiersRaw, setVerifiersRaw] = useState('');
   const [vehiclesRaw, setVehiclesRaw] = useState('');
+  const [vehicleSizesRaw, setVehicleSizesRaw] = useState('');
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -48,8 +51,10 @@ export const Settings: React.FC<SettingsProps> = ({ onSettingsSaved }) => {
   const [featureRequestEmail, setFeatureRequestEmail] = useState('');
   const [featureRequestMessage, setFeatureRequestMessage] = useState('');
   const [featureRequestResult, setFeatureRequestResult] = useState('');
-  const [submittingFeatureRequest, setSubmittingFeatureRequest] = useState(false);
-  const [activePolicyModal, setActivePolicyModal] = useState<'privacy' | 'security' | null>(null);
+  const [featureRequestStatus, setFeatureRequestStatus] = useState<ButtonStatus>('idle');
+  const [featureRequestCategory, setFeatureRequestCategory] = useState('Logistics & Dispatches');
+  const [activePolicyModal, setActivePolicyModal] = useState<'privacy' | 'security' | 'documentation' | 'feature-request' | null>(null);
+  const [docTab, setDocTab] = useState<'overview' | 'vehicles' | 'printing' | 'reports' | 'shortcuts'>('overview');
 
   const fetchSettings = async () => {
     try {
@@ -60,6 +65,7 @@ export const Settings: React.FC<SettingsProps> = ({ onSettingsSaved }) => {
       setScannersRaw((data.scannersList || []).join('\n'));
       setVerifiersRaw((data.verifiersList || []).join('\n'));
       setVehiclesRaw((data.vehiclesList || []).join('\n'));
+      setVehicleSizesRaw((data.vehicleSizesList || ['32 ft', '20 ft', '10 ft']).join('\n'));
 
       // Fetch version info from updater module
       try {
@@ -116,8 +122,8 @@ export const Settings: React.FC<SettingsProps> = ({ onSettingsSaved }) => {
 
   const handleFeatureRequestSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    setSubmittingFeatureRequest(true);
-    setFeatureRequestResult('Sending....');
+    setFeatureRequestStatus('loading');
+    setFeatureRequestResult('Sending request to Stivate engineering...');
 
     try {
       const formData = new FormData(event.currentTarget);
@@ -132,19 +138,22 @@ export const Settings: React.FC<SettingsProps> = ({ onSettingsSaved }) => {
       console.log('Web3Forms response:', data);
 
       if (response.ok && (data.success === true || data.message === 'Message sent successfully' || data.status === 'success')) {
-        setFeatureRequestResult('Form Submitted Successfully');
+        setFeatureRequestStatus('success');
+        setFeatureRequestResult('Thank you! Your feature request has been submitted successfully to Stivate Product Engineering.');
         setFeatureRequestName('');
         setFeatureRequestEmail('');
         setFeatureRequestMessage('');
-        event.currentTarget.reset();
+        setTimeout(() => setFeatureRequestStatus('idle'), 2500);
       } else {
+        setFeatureRequestStatus('error');
         setFeatureRequestResult('Error submitting feature request. Please try again.');
+        setTimeout(() => setFeatureRequestStatus('idle'), 2500);
       }
     } catch (err) {
       console.error('Feature request submit failed:', err);
+      setFeatureRequestStatus('error');
       setFeatureRequestResult('Error submitting feature request. Please check your network and try again.');
-    } finally {
-      setSubmittingFeatureRequest(false);
+      setTimeout(() => setFeatureRequestStatus('idle'), 2500);
     }
   };
 
@@ -159,6 +168,7 @@ export const Settings: React.FC<SettingsProps> = ({ onSettingsSaved }) => {
     const scannersList = scannersRaw.split('\n').map(l => l.trim()).filter(Boolean);
     const verifiersList = verifiersRaw.split('\n').map(l => l.trim()).filter(Boolean);
     const vehiclesList = vehiclesRaw.split('\n').map(l => l.trim()).filter(Boolean);
+    const vehicleSizesList = vehicleSizesRaw.split('\n').map(l => l.trim()).filter(Boolean);
 
     const updatedSettings = {
       ...settings,
@@ -166,7 +176,8 @@ export const Settings: React.FC<SettingsProps> = ({ onSettingsSaved }) => {
       suppliersList,
       scannersList,
       verifiersList,
-      vehiclesList
+      vehiclesList,
+      vehicleSizesList,
     };
 
     try {
@@ -250,187 +261,6 @@ export const Settings: React.FC<SettingsProps> = ({ onSettingsSaved }) => {
 
   return (
     <div className="space-y-6">
-      {/* User Documentation & Operating Guide */}
-      <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-6 select-none">
-        <div className="flex items-center justify-between border-b border-slate-100 pb-4">
-          <div className="flex items-center gap-2">
-            <BookOpen size={20} className="text-[#4BB8FA]" />
-            <h3 className="text-md font-bold text-slate-800 uppercase tracking-wider">User Documentation & Operating Guide</h3>
-          </div>
-          <span className="text-xs px-2.5 py-1 bg-blue-50 text-blue-700 font-bold rounded-full border border-blue-100">
-            Quick Start Guide
-          </span>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          <div className="bg-slate-50 p-4 rounded-xl border border-slate-200/80 space-y-2">
-            <div className="flex items-center gap-2 text-xs font-bold text-slate-800 uppercase tracking-wider">
-              <span className="w-5 h-5 rounded-full bg-[#4BB8FA] text-slate-900 text-xs font-black flex items-center justify-center shrink-0">1</span>
-              <span>Create Dispatch</span>
-            </div>
-            <p className="text-xs text-slate-600 leading-relaxed">
-              Press <kbd className="px-1 py-0.5 bg-white border border-slate-300 rounded font-mono text-[10px] text-slate-700 font-bold">Ctrl+N</kbd> or click <strong>Dispatch Pipeline</strong>. Enter Vehicle No, Customer, Consignee, and Pallets Count.
-            </p>
-          </div>
-
-          <div className="bg-slate-50 p-4 rounded-xl border border-slate-200/80 space-y-2">
-            <div className="flex items-center gap-2 text-xs font-bold text-slate-800 uppercase tracking-wider">
-              <span className="w-5 h-5 rounded-full bg-[#4BB8FA] text-slate-900 text-xs font-black flex items-center justify-center shrink-0">2</span>
-              <span>Scan & Verify</span>
-            </div>
-            <p className="text-xs text-slate-600 leading-relaxed">
-              Paste Pull List numbers into the scan box. Click <strong>Mark Verified</strong> next to pull list items when verified into truck slots.
-            </p>
-          </div>
-
-          <div className="bg-slate-50 p-4 rounded-xl border border-slate-200/80 space-y-2">
-            <div className="flex items-center gap-2 text-xs font-bold text-slate-800 uppercase tracking-wider">
-              <span className="w-5 h-5 rounded-full bg-[#4BB8FA] text-slate-900 text-xs font-black flex items-center justify-center shrink-0">3</span>
-              <span>Print Documents</span>
-            </div>
-            <p className="text-xs text-slate-600 leading-relaxed">
-              Click <strong>Print Combined Dispatch</strong> (or <kbd className="px-1 py-0.5 bg-white border border-slate-300 rounded font-mono text-[10px] text-slate-700 font-bold">Ctrl+P</kbd>) to print 3 landscape copies of Challan & Barcodes.
-            </p>
-          </div>
-
-          <div className="bg-slate-50 p-4 rounded-xl border border-slate-200/80 space-y-2">
-            <div className="flex items-center gap-2 text-xs font-bold text-slate-800 uppercase tracking-wider">
-              <span className="w-5 h-5 rounded-full bg-[#4BB8FA] text-slate-900 text-xs font-black flex items-center justify-center shrink-0">4</span>
-              <span>Complete & Archive</span>
-            </div>
-            <p className="text-xs text-slate-600 leading-relaxed">
-              When loaded, click <strong>Complete Dispatch</strong>. Departure time is recorded and archived under <strong>Completed</strong> (<kbd className="px-1 py-0.5 bg-white border border-slate-300 rounded font-mono text-[10px] text-slate-700 font-bold">Ctrl+H</kbd>).
-            </p>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-2">
-          <div className="space-y-3">
-            <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
-              <Keyboard size={14} className="text-blue-500" />
-              Keyboard Shortcuts Cheat Sheet
-            </h4>
-            <div className="bg-slate-50/50 rounded-xl border border-slate-200 divide-y divide-slate-100 text-xs">
-              <div className="p-2.5 flex items-center justify-between">
-                <span className="text-slate-600 font-medium">Create New Dispatch Truck</span>
-                <kbd className="px-2 py-0.5 bg-white border border-slate-200 rounded font-mono font-bold text-slate-700">Ctrl + N</kbd>
-              </div>
-              <div className="p-2.5 flex items-center justify-between">
-                <span className="text-slate-600 font-medium">View Completed Archive</span>
-                <kbd className="px-2 py-0.5 bg-white border border-slate-200 rounded font-mono font-bold text-slate-700">Ctrl + H</kbd>
-              </div>
-              <div className="p-2.5 flex items-center justify-between">
-                <span className="text-slate-600 font-medium">Print Combined Dispatch (3 copies)</span>
-                <kbd className="px-2 py-0.5 bg-white border border-slate-200 rounded font-mono font-bold text-slate-700">Ctrl + P</kbd>
-              </div>
-              <div className="p-2.5 flex items-center justify-between">
-                <span className="text-slate-600 font-medium">Save Draft Dispatch</span>
-                <kbd className="px-2 py-0.5 bg-white border border-slate-200 rounded font-mono font-bold text-slate-700">Ctrl + S</kbd>
-              </div>
-            </div>
-          </div>
-
-          <div className="space-y-3">
-            <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
-              <HelpCircle size={14} className="text-amber-500" />
-              Tips & Database Backup
-            </h4>
-            <div className="bg-slate-50/50 p-3.5 rounded-xl border border-slate-200 text-xs text-slate-600 space-y-2 leading-relaxed">
-              <p>• <strong>Automatic Cloud & Local Backup:</strong> All database records are automatically backed up locally and uploaded to AWS S3 Cloud upon exiting the application.</p>
-              <p>• <strong>Landscape Printing:</strong> Both Challan invoices and Barcode sheets print in high-clarity A4 Landscape format for instant scanner recognition.</p>
-              <p>• <strong>Auto-Updates:</strong> Check for application updates anytime in this Settings menu. Downloaded updates install in 1-click on restart.</p>
-            </div>
-          </div>
-        </div>
-
-        {/* Application Legal & Security Policies Bar */}
-        <div className="pt-4 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-3">
-          <div className="flex items-center gap-2 text-xs font-bold text-slate-600">
-            <ShieldCheck size={16} className="text-emerald-500" />
-            <span>Software Governance & Security Compliance</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => setActivePolicyModal('privacy')}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-lg text-xs font-bold transition-colors cursor-pointer"
-            >
-              <FileText size={13} className="text-blue-500" />
-              <span>Privacy Policy</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setActivePolicyModal('security')}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-lg text-xs font-bold transition-colors cursor-pointer"
-            >
-              <Lock size={13} className="text-emerald-500" />
-              <span>Security Policy</span>
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-          <div>
-            <h3 className="text-md font-bold text-slate-700 uppercase tracking-wider">Feature Request</h3>
-          </div>
-        </div>
-
-        <form onSubmit={handleFeatureRequestSubmit} className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-1">
-              <label className="text-xs font-bold text-slate-500 uppercase">Name</label>
-              <input
-                type="text"
-                name="name"
-                value={featureRequestName}
-                onChange={(e) => setFeatureRequestName(e.target.value)}
-                required
-                className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-slate-50 focus:outline-none focus:border-emerald-500 focus:bg-white transition-colors"
-              />
-            </div>
-            <div className="space-y-1">
-              <label className="text-xs font-bold text-slate-500 uppercase">Email</label>
-              <input
-                type="email"
-                name="email"
-                value={featureRequestEmail}
-                onChange={(e) => setFeatureRequestEmail(e.target.value)}
-                required
-                className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-slate-50 focus:outline-none focus:border-emerald-500 focus:bg-white transition-colors"
-              />
-            </div>
-          </div>
-
-          <div className="space-y-1">
-            <label className="text-xs font-bold text-slate-500 uppercase">Feature Request</label>
-            <textarea
-              name="message"
-              value={featureRequestMessage}
-              onChange={(e) => setFeatureRequestMessage(e.target.value)}
-              required
-              rows={4}
-              className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-slate-50 focus:outline-none focus:border-emerald-500 focus:bg-white transition-colors"
-              placeholder="Describe the feature you'd like to see..."
-            />
-          </div>
-
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-            <button
-              type="submit"
-              disabled={submittingFeatureRequest}
-              className="inline-flex items-center justify-center px-4 py-2 bg-[#4BB8FA] hover:bg-[#35a0dc] text-slate-900 rounded-lg text-sm font-bold transition-colors disabled:bg-slate-200 disabled:text-slate-400"
-            >
-              {submittingFeatureRequest ? 'Sending...' : 'Submit Feature Request'}
-            </button>
-            {featureRequestResult && (
-              <span className="text-sm text-slate-600">{featureRequestResult}</span>
-            )}
-          </div>
-        </form>
-      </div>
-
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left Form Column */}
         <form onSubmit={handleSave} className="lg:col-span-2 bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-6">
@@ -563,7 +393,7 @@ export const Settings: React.FC<SettingsProps> = ({ onSettingsSaved }) => {
           <hr className="border-slate-200" />
           <h4 className="text-xs font-extrabold text-slate-400 uppercase tracking-wider">Logistics Dropdown Options</h4>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6">
             {/* Addresses list */}
             <div className="space-y-2 p-4 bg-slate-50 border border-slate-200 rounded-xl flex flex-col justify-between">
               <div>
@@ -703,6 +533,34 @@ export const Settings: React.FC<SettingsProps> = ({ onSettingsSaved }) => {
                 </select>
               </div>
             </div>
+
+            {/* Vehicle Sizes list */}
+            <div className="space-y-2 p-4 bg-slate-50 border border-slate-200 rounded-xl flex flex-col justify-between">
+              <div>
+                <label className="text-xs font-bold text-slate-600 uppercase block">Vehicle Sizes & Capacity</label>
+                <span className="text-[10px] text-slate-400 block mb-1">Enter one size per line (e.g. 32 ft, 20 ft, 10 ft).</span>
+                <textarea
+                  value={vehicleSizesRaw}
+                  onChange={(e) => setVehicleSizesRaw(e.target.value)}
+                  rows={5}
+                  placeholder="32 ft&#10;20 ft&#10;10 ft"
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs bg-white focus:outline-none focus:border-emerald-500 font-sans"
+                />
+              </div>
+              <div className="space-y-1 mt-2">
+                <label className="text-[10px] font-bold text-slate-500 uppercase block">Default Vehicle Size</label>
+                <select
+                  value={settings.defaultVehicleSize || '32 ft'}
+                  onChange={(e) => setSettings(prev => ({ ...prev, defaultVehicleSize: e.target.value }))}
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs bg-white focus:outline-none focus:border-emerald-500 cursor-pointer font-bold"
+                >
+                  <option value="">-- Select Default --</option>
+                  {(vehicleSizesRaw.split('\n').map(l => l.trim()).filter(Boolean)).map((opt, i) => (
+                    <option key={i} value={opt}>{opt}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
           </div>
 
           <div className="flex justify-end pt-4">
@@ -818,6 +676,38 @@ export const Settings: React.FC<SettingsProps> = ({ onSettingsSaved }) => {
             </div>
           </div>
 
+          {/* Help, Docs & Feature Requests */}
+          <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-4">
+            <h4 className="text-sm font-bold text-slate-700 uppercase tracking-wider flex items-center gap-2">
+              <BookOpen size={16} className="text-[#4BB8FA]" />
+              User Documentation & Feature Request
+            </h4>
+
+            <div className="text-xs text-slate-500 space-y-1">
+              <p>Access full operating manual, workflow cheat sheets, or submit new feature requests to product engineering.</p>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => setActivePolicyModal('documentation')}
+                className="flex items-center justify-center gap-1.5 px-3 py-2 bg-blue-50 hover:bg-blue-100 text-blue-800 border border-blue-200 rounded-lg text-xs font-bold cursor-pointer transition-colors"
+              >
+                <BookOpen size={14} className="text-blue-600 shrink-0" />
+                <span>User Guide</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setActivePolicyModal('feature-request')}
+                className="flex items-center justify-center gap-1.5 px-3 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-lg text-xs font-bold cursor-pointer transition-colors"
+              >
+                <Sparkles size={14} className="text-emerald-600 shrink-0" />
+                <span>Request Feature</span>
+              </button>
+            </div>
+          </div>
+
           {/* Legal & Security Policies */}
           <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-4">
             <h4 className="text-sm font-bold text-slate-700 uppercase tracking-wider flex items-center gap-2">
@@ -850,21 +740,315 @@ export const Settings: React.FC<SettingsProps> = ({ onSettingsSaved }) => {
             </div>
           </div>
 
-          {/* Created By Logo (bottom right corner) */}
-          <div className="flex flex-col items-center justify-end pt-16 mt-auto space-y-3 opacity-95 select-none">
-            <span className="text-xs font-bold text-slate-400 uppercase tracking-widest">Software Developed By</span>
-            <img src="stivate.png" alt="Stivate Logo" className="h-20 w-auto object-contain brightness-95" />
+          {/* Powered By Logo */}
+          <div className="flex flex-col items-center justify-end pt-12 mt-auto space-y-2 select-none">
+            <span className="text-xs font-extrabold text-slate-400 uppercase tracking-widest text-center">Powered By</span>
+            <img src="stivate.png" alt="Stivate Logo" className="h-24 sm:h-28 w-auto object-contain brightness-95 opacity-90 hover:opacity-100 transition-all duration-150" />
           </div>
         </div>
       </div>
 
-      {/* Privacy Policy & Security Policy Modal */}
+      {/* Privacy Policy, Security Policy, User Documentation & Feature Request Modal */}
       <Modal
         isOpen={activePolicyModal !== null}
         onClose={() => setActivePolicyModal(null)}
-        title={activePolicyModal === 'privacy' ? 'Application Privacy Policy' : 'Application Security Policy'}
+        title={
+          activePolicyModal === 'privacy'
+            ? 'Application Privacy Policy'
+            : activePolicyModal === 'security'
+            ? 'Application Security Policy'
+            : activePolicyModal === 'documentation'
+            ? 'User Documentation & Operating Manual'
+            : 'Submit Feature Request & Feedback'
+        }
         maxWidth="max-w-4xl"
       >
+        {activePolicyModal === 'documentation' && (
+          <div className="space-y-6 text-slate-700 leading-relaxed text-sm select-none">
+            <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 className="text-base font-bold text-slate-800 flex items-center gap-2">
+                  <BookOpen size={18} className="text-[#4BB8FA]" />
+                  <span>User Documentation & Operating Manual</span>
+                </h2>
+                <p className="text-xs text-slate-500 font-medium">Standard Operating Procedures for DC Delivery System</p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2 text-xs font-bold">
+                <span className="px-2.5 py-1 bg-blue-50 text-blue-700 rounded-md border border-blue-100">v{currentVersion}</span>
+                <span className="px-2.5 py-1 bg-emerald-50 text-emerald-700 rounded-md border border-emerald-100">Offline-First</span>
+              </div>
+            </div>
+
+            {/* Navigation Tabs */}
+            <div className="flex items-center gap-1.5 border-b border-slate-200 pb-2 overflow-x-auto">
+              {[
+                { id: 'overview', label: '1. Quick Start Overview', icon: HelpCircle },
+                { id: 'vehicles', label: '2. Vehicle Sizes & Pallets', icon: HardDriveDownload },
+                { id: 'printing', label: '3. Printing Rules', icon: FileText },
+                { id: 'reports', label: '4. Reports & Security', icon: Lock },
+                { id: 'shortcuts', label: '5. Keyboard Shortcuts', icon: Keyboard },
+              ].map((tab) => {
+                const Icon = tab.icon;
+                const active = docTab === tab.id;
+                return (
+                  <button
+                    key={tab.id}
+                    onClick={() => setDocTab(tab.id as any)}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
+                      active
+                        ? 'bg-[#4BB8FA] text-slate-900 shadow-xs'
+                        : 'bg-slate-50 text-slate-600 hover:bg-slate-100 border border-slate-200/60'
+                    }`}
+                  >
+                    <Icon size={14} />
+                    <span>{tab.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Tab Contents */}
+            {docTab === 'overview' && (
+              <div className="space-y-4">
+                <h4 className="text-sm font-bold text-slate-900 uppercase tracking-wide">Standard Dispatch Workflow</h4>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-2">
+                    <div className="flex items-center gap-2 text-xs font-extrabold text-slate-800 uppercase">
+                      <span className="w-6 h-6 rounded-full bg-[#4BB8FA] text-slate-950 flex items-center justify-center font-black">1</span>
+                      <span>Create New Dispatch</span>
+                    </div>
+                    <p className="text-xs text-slate-600 leading-relaxed">
+                      Press <kbd className="px-1.5 py-0.5 bg-white border border-slate-300 rounded font-mono text-[10px] text-slate-800 font-bold">Ctrl+N</kbd> or click <strong>Dispatch Pipeline → Create New Dispatch</strong>. Enter Vehicle Number, Supervisor Name, Consignee Address, and Pallet Capacity Count.
+                    </p>
+                  </div>
+
+                  <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-2">
+                    <div className="flex items-center gap-2 text-xs font-extrabold text-slate-800 uppercase">
+                      <span className="w-6 h-6 rounded-full bg-[#4BB8FA] text-slate-950 flex items-center justify-center font-black">2</span>
+                      <span>Scan & Verify Pull Lists</span>
+                    </div>
+                    <p className="text-xs text-slate-600 leading-relaxed">
+                      Paste or scan Pull List barcodes directly into the input box. Unrecognized items prompt the manual entry modal. Click <strong>Verify</strong> next to pending items once loaded into truck slots.
+                    </p>
+                  </div>
+
+                  <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-2">
+                    <div className="flex items-center gap-2 text-xs font-extrabold text-slate-800 uppercase">
+                      <span className="w-6 h-6 rounded-full bg-[#4BB8FA] text-slate-950 flex items-center justify-center font-black">3</span>
+                      <span>Print Document Sets</span>
+                    </div>
+                    <p className="text-xs text-slate-600 leading-relaxed">
+                      Click the green <strong>Print Set</strong> button (or <kbd className="px-1.5 py-0.5 bg-white border border-slate-300 rounded font-mono text-[10px] text-slate-800 font-bold">Ctrl+P</kbd>) to automatically print 6 copies (3x Challan + 3x Barcode sheets). Single print buttons send 1 copy.
+                    </p>
+                  </div>
+
+                  <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-2">
+                    <div className="flex items-center gap-2 text-xs font-extrabold text-slate-800 uppercase">
+                      <span className="w-6 h-6 rounded-full bg-[#4BB8FA] text-slate-950 flex items-center justify-center font-black">4</span>
+                      <span>Complete & Archive</span>
+                    </div>
+                    <p className="text-xs text-slate-600 leading-relaxed">
+                      Click <strong>Mark Ready</strong> while loading, then <strong>Complete Dispatch</strong> upon departure. The animated truck confirmation executes and archives the dispatch under <strong>Completed</strong> (<kbd className="px-1.5 py-0.5 bg-white border border-slate-300 rounded font-mono text-[10px] text-slate-800 font-bold">Ctrl+H</kbd>).
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {docTab === 'vehicles' && (
+              <div className="space-y-4 text-xs text-slate-600">
+                <h4 className="text-sm font-bold text-slate-900 uppercase tracking-wide">Vehicle Sizes & Truck Pallet Capacities</h4>
+                <p>Truck utilization percentage is tracked automatically based on configured vehicle dimensions:</p>
+                <div className="bg-slate-50 rounded-xl border border-slate-200 overflow-hidden divide-y divide-slate-200">
+                  <div className="p-3 bg-slate-100 font-bold text-slate-800 grid grid-cols-3">
+                    <span>Vehicle Size</span>
+                    <span>Max Pallet Capacity</span>
+                    <span>Calculation Rule</span>
+                  </div>
+                  <div className="p-3 grid grid-cols-3 font-mono font-semibold">
+                    <span className="text-blue-700">32 ft</span>
+                    <span>16 Pallets Max</span>
+                    <span className="text-slate-500">Standard Heavy Trailer</span>
+                  </div>
+                  <div className="p-3 grid grid-cols-3 font-mono font-semibold">
+                    <span className="text-indigo-700">20 ft</span>
+                    <span>8 Pallets Max</span>
+                    <span className="text-slate-500">Medium Container</span>
+                  </div>
+                  <div className="p-3 grid grid-cols-3 font-mono font-semibold">
+                    <span className="text-amber-700">10 ft</span>
+                    <span>2 Pallets Max</span>
+                    <span className="text-slate-500">Small Pickup / Van</span>
+                  </div>
+                  <div className="p-3 grid grid-cols-3 font-mono font-semibold">
+                    <span className="text-slate-700">Custom (e.g. N ft)</span>
+                    <span>Floor(N / 2) Pallets</span>
+                    <span className="text-slate-500">Dynamic length division</span>
+                  </div>
+                </div>
+                <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-amber-900">
+                  <strong>Specific Truck Lookup:</strong> Go to <strong>Dashboard → Specific Vehicle Utilization Tracker</strong> to filter dispatches by truck number and view total pallet capacity utilization.
+                </div>
+              </div>
+            )}
+
+            {docTab === 'printing' && (
+              <div className="space-y-4 text-xs text-slate-600">
+                <h4 className="text-sm font-bold text-slate-900 uppercase tracking-wide">Printer Configuration & Ink-Saving Rules</h4>
+                <ul className="list-disc pl-4 space-y-2">
+                  <li><strong>Printer Ink Preservation:</strong> Grey table borders and barcode line boxes have been removed to preserve printer toner cartridge life.</li>
+                  <li><strong>Multi-Line Address Wrapping:</strong> Long consignee addresses wrap cleanly across multiple lines in bold text without truncating (`...`). Subheader barcode bars adjust height dynamically.</li>
+                  <li><strong>Print Set Buttons:</strong> Clicking <strong>Print Set</strong> sends 6 physical copies (3x Challan + 3x Barcode sheets). Single print buttons send 1 copy.</li>
+                  <li><strong>Warehouse Header Prefix:</strong> Change the <strong>Warehouse Location / Header Prefix</strong> setting in Settings to customize printed PDF headers (e.g. <code>F W H TO [Consignee]</code>).</li>
+                </ul>
+              </div>
+            )}
+
+            {docTab === 'reports' && (
+              <div className="space-y-4 text-xs text-slate-600">
+                <h4 className="text-sm font-bold text-slate-900 uppercase tracking-wide">Locked Reports & Automatic Backups</h4>
+                <div className="space-y-3">
+                  <div className="p-3 bg-rose-50 border border-rose-200 rounded-lg text-rose-900 space-y-1">
+                    <strong>Reports Password Lock:</strong>
+                    <p>The Reports & Analytics tab is protected with password security. Access password: <code className="font-mono font-extrabold bg-white px-2 py-0.5 rounded border border-rose-300">i3pl@123</code></p>
+                  </div>
+                  <p>• <strong>Automatic Local Backups:</strong> The system automatically writes timestamped SQLite database backups into your configured Backup folder every time the application closes.</p>
+                  <p>• <strong>Cloud Uploads:</strong> Click <strong>Upload Backup on Cloud</strong> in Settings anytime to sync local database snapshots with encrypted cloud storage.</p>
+                </div>
+              </div>
+            )}
+
+            {docTab === 'shortcuts' && (
+              <div className="space-y-4 text-xs text-slate-600">
+                <h4 className="text-sm font-bold text-slate-900 uppercase tracking-wide">Keyboard Shortcuts Quick Reference</h4>
+                <div className="bg-slate-50 rounded-xl border border-slate-200 divide-y divide-slate-200">
+                  {[
+                    { key: 'Ctrl + N', desc: 'Create New Dispatch Truck' },
+                    { key: 'Ctrl + H', desc: 'Open Completed Dispatch Archive' },
+                    { key: 'Ctrl + P', desc: 'Print Combined Dispatch Set (6 copies)' },
+                    { key: 'Ctrl + S', desc: 'Save Draft Dispatch' },
+                    { key: 'Ctrl + F', desc: 'Focus Pull List Search Box' },
+                  ].map((sc, i) => (
+                    <div key={i} className="p-3 flex items-center justify-between">
+                      <span className="font-medium text-slate-700">{sc.desc}</span>
+                      <kbd className="px-2.5 py-1 bg-white border border-slate-300 rounded-md font-mono font-bold text-slate-800 shadow-2xs">
+                        {sc.key}
+                      </kbd>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {activePolicyModal === 'feature-request' && (
+          <div className="space-y-5 text-slate-700 text-sm select-none">
+            <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 flex items-center justify-between gap-3">
+              <div>
+                <h2 className="text-base font-bold text-slate-800 flex items-center gap-2">
+                  <Sparkles size={18} className="text-emerald-500" />
+                  <span>Submit Feature Request & Product Feedback</span>
+                </h2>
+                <p className="text-xs text-slate-500 font-medium">Send feature ideas directly to Stivate Product Engineering</p>
+              </div>
+              <span className="px-2.5 py-1 bg-emerald-50 text-emerald-700 font-bold rounded-md border border-emerald-100 text-xs">
+                Direct Feedback
+              </span>
+            </div>
+
+            <form onSubmit={handleFeatureRequestSubmit} className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-600 uppercase block">Your Name</label>
+                  <input
+                    type="text"
+                    name="name"
+                    value={featureRequestName}
+                    onChange={(e) => setFeatureRequestName(e.target.value)}
+                    required
+                    placeholder="Operator / Admin Name"
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs bg-slate-50 focus:outline-none focus:border-emerald-500 focus:bg-white font-medium"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-600 uppercase block">Contact Email</label>
+                  <input
+                    type="email"
+                    name="email"
+                    value={featureRequestEmail}
+                    onChange={(e) => setFeatureRequestEmail(e.target.value)}
+                    required
+                    placeholder="email@company.com"
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs bg-slate-50 focus:outline-none focus:border-emerald-500 focus:bg-white font-medium"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-slate-600 uppercase block">Feature Category</label>
+                <select
+                  name="category"
+                  value={featureRequestCategory}
+                  onChange={(e) => setFeatureRequestCategory(e.target.value)}
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs bg-slate-50 focus:outline-none focus:border-emerald-500 focus:bg-white font-medium cursor-pointer"
+                >
+                  <option value="Logistics & Dispatches">Logistics & Dispatches Workflow</option>
+                  <option value="Printing & Barcodes">Printing & Barcode Sheets</option>
+                  <option value="Reports & Analytics">Reports & Excel Export</option>
+                  <option value="Vehicle Capacities">Vehicle Sizes & Capacities</option>
+                  <option value="Performance & Database">Performance & Database Backups</option>
+                  <option value="Other UI">Other Interface / Feature Request</option>
+                </select>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-slate-600 uppercase block">Feature Description / Feedback Details</label>
+                <textarea
+                  name="message"
+                  value={featureRequestMessage}
+                  onChange={(e) => setFeatureRequestMessage(e.target.value)}
+                  required
+                  rows={4}
+                  placeholder="Describe the feature or improvement you'd like to see..."
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs bg-slate-50 focus:outline-none focus:border-emerald-500 focus:bg-white font-sans"
+                />
+              </div>
+
+              {featureRequestResult && (
+                <div className={`p-3 rounded-lg text-xs font-semibold border ${
+                  featureRequestStatus === 'success'
+                    ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                    : featureRequestStatus === 'error'
+                    ? 'bg-rose-50 text-rose-800 border-rose-200'
+                    : 'bg-blue-50 text-blue-800 border-blue-200'
+                }`}>
+                  {featureRequestResult}
+                </div>
+              )}
+
+              <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setActivePolicyModal(null)}
+                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-semibold cursor-pointer"
+                >
+                  Close
+                </button>
+                <AnimatedStatusButton
+                  type="submit"
+                  status={featureRequestStatus}
+                  idleText="Submit Feature Request"
+                  loadingText="Submitting..."
+                  successText="✓ Submitted"
+                  variant="primary"
+                />
+              </div>
+            </form>
+          </div>
+        )}
+
         {activePolicyModal === 'privacy' && (
           <div className="space-y-6 text-slate-700 leading-relaxed text-sm">
             <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 flex flex-wrap items-center justify-between gap-3 select-none">

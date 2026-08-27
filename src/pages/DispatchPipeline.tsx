@@ -1,8 +1,11 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { databaseService, settingsService } from '../services/ipc';
 import type { Dispatch, PipelineStats } from '../types';
-import { Play, CheckCircle, Clock, ClipboardList, Eye, ArrowRight, Hourglass, Search, X, Plus, User } from 'lucide-react';
+import { getVehicleMaxPallets } from '../types';
+import { Play, CheckCircle, Clock, ClipboardList, Eye, Hourglass, Search, X, Plus, User } from 'lucide-react';
 import { Modal } from '../components/Modal';
+import { AnimatedStatusButton } from '../components/animations';
+import type { ButtonStatus } from '../components/animations';
 
 interface DispatchPipelineProps {
   onEditDispatch: (id: number) => void;
@@ -33,7 +36,7 @@ const formatDateTimeDisplay = (dateStr: string) => {
       const mins = String(dObj.getMinutes()).padStart(2, '0');
       return `${dObj.getDate()}-${months[dObj.getMonth()]}-${dObj.getFullYear().toString().slice(-2)} ${String(hours).padStart(2, '0')}:${mins} ${ampm}`;
     }
-  } catch (e) {}
+  } catch (e) { }
   return dateStr;
 };
 
@@ -65,6 +68,7 @@ export const DispatchPipeline: React.FC<DispatchPipelineProps> = ({
     dc_no: '',
     date: getNowDateTimeString(),
     vehicle_no: '',
+    vehicle_size: '32 ft',
     supplier_name: '',
     address: '',
     total_pallets: 1,
@@ -86,19 +90,21 @@ export const DispatchPipeline: React.FC<DispatchPipelineProps> = ({
 
       // 2. Fetch active dispatches (loading + ready)
       const data = await databaseService.getAllDispatches(['loading', 'ready']);
-      
-      // Calculate loaded items count for progress column
+
+      // Calculate loaded items count and total pull lists count for progress column
       const dispatchesWithCount = await Promise.all(
         data.map(async (d) => {
-          if (!d.id) return { ...d, loadedCount: 0 };
+          if (!d.id) return { ...d, loadedCount: 0, totalPullLists: 0 };
           const fullDispatch = await databaseService.getDispatch(d.id);
+          const items = fullDispatch?.items || [];
           return {
             ...d,
-            loadedCount: (fullDispatch?.items || []).filter((item: any) => !item.pull_list_no.endsWith('_pending')).length
+            loadedCount: items.filter((item: any) => !item.pull_list_no.endsWith('_pending')).length,
+            totalPullLists: items.length
           };
         })
       );
-      
+
       setActiveDispatches(dispatchesWithCount);
     } catch (err) {
       console.error('Failed to load pipeline data:', err);
@@ -138,6 +144,7 @@ export const DispatchPipeline: React.FC<DispatchPipelineProps> = ({
       dc_no: '',
       date: dateStr,
       vehicle_no: settings?.defaultVehicleNo || '',
+      vehicle_size: '32 ft',
       supplier_name: settings?.defaultSupplier || '',
       address: settings?.defaultAddress || 'AS PER LIST',
       total_pallets: 1,
@@ -161,26 +168,51 @@ export const DispatchPipeline: React.FC<DispatchPipelineProps> = ({
     }));
   };
 
+  const [createStatus, setCreateStatus] = useState<ButtonStatus>('idle');
+
   const handleNewDispatchSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newDispatch.vehicle_no.trim() || !newDispatch.supplier_name.trim()) {
       setFormError('Vehicle Number and Customer/Supervisor Name are required.');
+      setCreateStatus('error');
+      setTimeout(() => setCreateStatus('idle'), 1500);
       return;
     }
 
+    setCreateStatus('loading');
     try {
       const dispatchData = { ...newDispatch, dc_no: '' };
       const res = await databaseService.saveDispatch(dispatchData, []);
       if (res && res.id) {
-        setIsNewModalOpen(false);
-        await fetchPipelineData();
-        onEditDispatch(res.id);
+        setCreateStatus('success');
+
+        // Update local settings vehicles list if new truck number added
+        if (newDispatch.vehicle_no && settings) {
+          const cleanNo = newDispatch.vehicle_no.trim().toUpperCase();
+          const currentList = settings.vehiclesList || [];
+          if (!currentList.some((v: string) => v.trim().toUpperCase() === cleanNo)) {
+            setSettings((prevSettings: any) =>
+              prevSettings ? { ...prevSettings, vehiclesList: [...(prevSettings.vehiclesList || []), cleanNo] } : prevSettings
+            );
+          }
+        }
+
+        setTimeout(async () => {
+          setIsNewModalOpen(false);
+          setCreateStatus('idle');
+          await fetchPipelineData();
+          onEditDispatch(res.id);
+        }, 600);
       } else {
+        setCreateStatus('error');
         setFormError('Failed to create dispatch. Ensure database connection is stable.');
+        setTimeout(() => setCreateStatus('idle'), 1500);
       }
     } catch (err: any) {
       console.error(err);
+      setCreateStatus('error');
       setFormError(`Creation failed: ${err.message || err}`);
+      setTimeout(() => setCreateStatus('idle'), 1500);
     }
   };
 
@@ -344,11 +376,10 @@ export const DispatchPipeline: React.FC<DispatchPipelineProps> = ({
                   <button
                     key={st}
                     onClick={() => setStatusFilter(st)}
-                    className={`px-3 py-1 rounded-md text-xs font-bold transition-all capitalize cursor-pointer ${
-                      statusFilter === st
-                        ? 'bg-white text-slate-900 shadow-sm'
-                        : 'text-slate-500 hover:text-slate-800'
-                    }`}
+                    className={`px-3 py-1 rounded-md text-xs font-bold transition-all capitalize cursor-pointer ${statusFilter === st
+                      ? 'bg-white text-slate-900 shadow-sm'
+                      : 'text-slate-500 hover:text-slate-800'
+                      }`}
                   >
                     {st === 'all' ? 'All Status' : st}
                   </button>
@@ -411,16 +442,30 @@ export const DispatchPipeline: React.FC<DispatchPipelineProps> = ({
               <tbody className="divide-y divide-slate-100 bg-white">
                 {filteredDispatches.map((d) => {
                   const loaded = d.loadedCount;
-                  const expected = Math.max(d.total_pallets || 1, loaded);
-                  const progressPct = Math.min(100, Math.round((loaded / expected) * 100));
+                  const total = (d as any).totalPullLists || 0;
+                  const progressPct = total > 0 ? Math.min(100, Math.round((loaded / total) * 100)) : 0;
 
                   return (
                     <tr key={d.id} className="hover:bg-slate-50/50 transition-colors duration-100">
                       <td className="px-6 py-4 whitespace-nowrap text-sm font-mono font-bold text-slate-800">
                         {d.dc_no}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-700 font-bold uppercase">
-                        {d.vehicle_no}
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-700">
+                        <div className="font-extrabold uppercase text-slate-800">{d.vehicle_no}</div>
+                        {(() => {
+                          const vSize = d.vehicle_size || '32 ft';
+                          const maxP = getVehicleMaxPallets(vSize);
+                          const curP = d.total_pallets || 1;
+                          const utilPct = Math.round((curP / maxP) * 100);
+                          return (
+                            <div className="text-[10px] font-semibold text-slate-400 font-mono flex items-center gap-1.5 mt-0.5">
+                              <span className="bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-bold">{vSize}</span>
+                              <span className={utilPct > 100 ? 'text-rose-600 font-extrabold' : 'text-slate-500 font-bold'}>
+                                {curP}/{maxP} Pallets ({utilPct}%)
+                              </span>
+                            </div>
+                          );
+                        })()}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-600 font-medium">
                         {d.supplier_name}
@@ -431,7 +476,7 @@ export const DispatchPipeline: React.FC<DispatchPipelineProps> = ({
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-700 font-semibold w-64">
                         <div className="space-y-1.5 max-w-[200px]">
                           <div className="flex justify-between text-xs font-mono">
-                            <span>{loaded} / {expected}</span>
+                            <span>{loaded} / {total}</span>
                             <span className="font-bold text-slate-500">{progressPct}%</span>
                           </div>
                           <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden border border-slate-200">
@@ -443,11 +488,10 @@ export const DispatchPipeline: React.FC<DispatchPipelineProps> = ({
                         </div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm">
-                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold border ${
-                          d.status === 'ready'
-                            ? 'bg-indigo-50 text-indigo-800 border-indigo-200'
-                            : 'bg-amber-50 text-amber-800 border-amber-200'
-                        }`}>
+                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold border ${d.status === 'ready'
+                          ? 'bg-indigo-50 text-indigo-800 border-indigo-200'
+                          : 'bg-amber-50 text-amber-800 border-amber-200'
+                          }`}>
                           {d.status === 'ready' ? 'Ready' : 'Loading'}
                         </span>
                       </td>
@@ -458,7 +502,6 @@ export const DispatchPipeline: React.FC<DispatchPipelineProps> = ({
                         >
                           <Eye size={13} />
                           <span>Open</span>
-                          <ArrowRight size={12} />
                         </button>
                       </td>
                     </tr>
@@ -512,6 +555,20 @@ export const DispatchPipeline: React.FC<DispatchPipelineProps> = ({
                   <option key={i} value={opt} />
                 ))}
               </datalist>
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-xs font-bold text-slate-500 uppercase">Vehicle Size</label>
+              <select
+                name="vehicle_size"
+                value={newDispatch.vehicle_size || settings?.defaultVehicleSize || '32 ft'}
+                onChange={handleNewDispatchChange}
+                className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-slate-50 focus:outline-none focus:bg-white text-slate-700 cursor-pointer font-bold"
+              >
+                {(settings?.vehicleSizesList || ['32 ft', '20 ft', '10 ft']).map((vs: string, i: number) => (
+                  <option key={i} value={vs}>{vs}</option>
+                ))}
+              </select>
             </div>
 
             <div className="space-y-1">
@@ -620,12 +677,14 @@ export const DispatchPipeline: React.FC<DispatchPipelineProps> = ({
             >
               Cancel
             </button>
-            <button
+            <AnimatedStatusButton
               type="submit"
-              className="px-4 py-2 bg-[#4BB8FA] hover:bg-[#35a0dc] text-slate-900 rounded-lg text-xs font-bold cursor-pointer"
-            >
-              Create Dispatch
-            </button>
+              status={createStatus}
+              idleText="Create Dispatch"
+              loadingText="Creating..."
+              successText="✓ Created"
+              variant="primary"
+            />
           </div>
         </form>
       </Modal>

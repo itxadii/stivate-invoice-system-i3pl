@@ -153,7 +153,7 @@ const buildChallanPage = (pdfDoc: PDFDocument, dispatch: any, font: any, fontBol
     y: yCursor - 75,
     width: printableWidth,
     height: 75,
-    borderColor: rgb(0.8, 0.8, 0.8),
+    borderColor: rgb(0, 0, 0),
     borderWidth: 1,
   });
 
@@ -174,7 +174,7 @@ const buildChallanPage = (pdfDoc: PDFDocument, dispatch: any, font: any, fontBol
     start: { x: rightX - 10, y: yCursor },
     end: { x: rightX - 10, y: yCursor - 75 },
     thickness: 1,
-    color: rgb(0.8, 0.8, 0.8),
+    color: rgb(0, 0, 0),
   });
 
   page.drawText('GSTIN: 27AACCP7114K1ZB', { x: rightX, y: yCursor - 20, size: 11, font: fontBold, color: rgb(0.1, 0.1, 0.1) });
@@ -204,7 +204,7 @@ const buildChallanPage = (pdfDoc: PDFDocument, dispatch: any, font: any, fontBol
     y: yCursor - 90,
     width: printableWidth,
     height: 90,
-    borderColor: rgb(0.8, 0.8, 0.8),
+    borderColor: rgb(0, 0, 0),
     borderWidth: 1,
   });
 
@@ -212,7 +212,7 @@ const buildChallanPage = (pdfDoc: PDFDocument, dispatch: any, font: any, fontBol
     start: { x: rightX - 10, y: yCursor },
     end: { x: rightX - 10, y: yCursor - 90 },
     thickness: 1,
-    color: rgb(0.8, 0.8, 0.8),
+    color: rgb(0, 0, 0),
   });
 
   page.drawText('Consignee/ Transfer To,', { x: margin + 10, y: yCursor - 15, size: 11, font: fontBold, color: rgb(0.1, 0.1, 0.1) });
@@ -242,8 +242,7 @@ const buildChallanPage = (pdfDoc: PDFDocument, dispatch: any, font: any, fontBol
     y: yCursor - 20,
     width: printableWidth,
     height: 20,
-    color: rgb(0.95, 0.95, 0.95),
-    borderColor: rgb(0.8, 0.8, 0.8),
+    borderColor: rgb(0, 0, 0),
     borderWidth: 1,
   });
   page.drawText('SR NO', { x: margin + 10, y: yCursor - 14, size: 10.5, font: fontBold });
@@ -256,11 +255,11 @@ const buildChallanPage = (pdfDoc: PDFDocument, dispatch: any, font: any, fontBol
     y: yCursor - 120,
     width: printableWidth,
     height: 120,
-    borderColor: rgb(0.8, 0.8, 0.8),
+    borderColor: rgb(0, 0, 0),
     borderWidth: 1,
   });
-  page.drawLine({ start: { x: margin + 50, y: yCursor }, end: { x: margin + 50, y: yCursor - 120 }, thickness: 1, color: rgb(0.8, 0.8, 0.8) });
-  page.drawLine({ start: { x: rightX - 10, y: yCursor }, end: { x: rightX - 10, y: yCursor - 120 }, thickness: 1, color: rgb(0.8, 0.8, 0.8) });
+  page.drawLine({ start: { x: margin + 50, y: yCursor }, end: { x: margin + 50, y: yCursor - 120 }, thickness: 1, color: rgb(0, 0, 0) });
+  page.drawLine({ start: { x: rightX - 10, y: yCursor }, end: { x: rightX - 10, y: yCursor - 120 }, thickness: 1, color: rgb(0, 0, 0) });
 
   page.drawText('1', { x: margin + 20, y: yCursor - 60, size: 11, font });
   page.drawText(dispatch.particular || 'AS PER LIST', { x: margin + 80, y: yCursor - 60, size: 12, font: fontBold });
@@ -272,12 +271,11 @@ const buildChallanPage = (pdfDoc: PDFDocument, dispatch: any, font: any, fontBol
     y: yCursor - 20,
     width: printableWidth,
     height: 20,
-    borderColor: rgb(0.8, 0.8, 0.8),
+    borderColor: rgb(0, 0, 0),
     borderWidth: 1,
-    color: rgb(0.97, 0.97, 0.97),
   });
-  page.drawLine({ start: { x: margin + 50, y: yCursor }, end: { x: margin + 50, y: yCursor - 20 }, thickness: 1, color: rgb(0.8, 0.8, 0.8) });
-  page.drawLine({ start: { x: rightX - 10, y: yCursor }, end: { x: rightX - 10, y: yCursor - 20 }, thickness: 1, color: rgb(0.8, 0.8, 0.8) });
+  page.drawLine({ start: { x: margin + 50, y: yCursor }, end: { x: margin + 50, y: yCursor - 20 }, thickness: 1, color: rgb(0, 0, 0) });
+  page.drawLine({ start: { x: rightX - 10, y: yCursor }, end: { x: rightX - 10, y: yCursor - 20 }, thickness: 1, color: rgb(0, 0, 0) });
 
   page.drawText('Total', { x: margin + 80, y: yCursor - 14, size: 11, font: fontBold });
   page.drawText(String(dispatch.total_pallets || 1), { x: margin + 420, y: yCursor - 14, size: 11, font: fontBold });
@@ -288,7 +286,7 @@ const buildChallanPage = (pdfDoc: PDFDocument, dispatch: any, font: any, fontBol
     y: yCursor - 120,
     width: printableWidth,
     height: 120,
-    borderColor: rgb(0.8, 0.8, 0.8),
+    borderColor: rgb(0, 0, 0),
     borderWidth: 1,
   });
 
@@ -340,7 +338,7 @@ const buildBarcodePages = (pdfDoc: PDFDocument, items: any[], font: any, fontBol
     }
   }
 
-  const drawHeaderAndTableHeaders = (p: any, pageIndex: number, totalPages: number) => {
+  const drawHeaderAndTableHeaders = (p: any, pageIndex: number, totalPages: number): number => {
     let yCursor = 595.276 - margin;
 
     p.drawRectangle({
@@ -348,7 +346,7 @@ const buildBarcodePages = (pdfDoc: PDFDocument, items: any[], font: any, fontBol
       y: yCursor - 30,
       width: printableWidth,
       height: 30,
-      borderColor: rgb(0.8, 0.8, 0.8),
+      borderColor: rgb(0, 0, 0),
       borderWidth: 1,
     });
 
@@ -361,38 +359,51 @@ const buildBarcodePages = (pdfDoc: PDFDocument, items: any[], font: any, fontBol
 
     yCursor -= 30;
 
+    // Multi-line Address wrapping to prevent any "..." truncation!
+    const fullAddress = dispatch?.address || consigneeAddrName;
+    const addrLines = (fullAddress as string)
+      .split('\n')
+      .flatMap((line: string) => wrapText(line.trim(), 30))
+      .filter(Boolean);
+
+    const lineCount = Math.max(1, addrLines.length);
+    // Expand subheader bar dynamically: 26 for 1 line, +11 for each extra line (max 48pt)
+    const subheaderHeight = Math.min(50, 26 + (lineCount - 1) * 11);
+
     p.drawRectangle({
       x: margin,
-      y: yCursor - 26,
+      y: yCursor - subheaderHeight,
       width: printableWidth,
-      height: 26,
-      borderColor: rgb(0.8, 0.8, 0.8),
+      height: subheaderHeight,
+      borderColor: rgb(0, 0, 0),
       borderWidth: 1,
-      color: rgb(0.96, 0.97, 0.98),
     });
 
-    // Subheader Box Positions (no overlaps!)
+    // Subheader Box Contents (no overlaps!)
     p.drawText(`DC NO: ${dcNo}`, { x: margin + 10, y: yCursor - 17, size: 9.5, font: fontBold });
     p.drawText(`NO OF PALLETS: ${palletsCount}`, { x: margin + 195, y: yCursor - 17, size: 9.5, font: fontBold });
-
-    // Dynamic Sizing for Address to ensure zero overlap with Date & Time
-    const safeAddr = consigneeAddrName.length > 45 ? consigneeAddrName.substring(0, 42) + '...' : consigneeAddrName;
-    let addrFontSize = 9.5;
-    if (safeAddr.length > 35) addrFontSize = 7.5;
-    else if (safeAddr.length > 25) addrFontSize = 8.5;
-
-    p.drawText(`ADDRESS: ${safeAddr}`, { x: margin + 335, y: yCursor - 17, size: addrFontSize, font: fontBold });
     p.drawText(`DATE & TIME: ${dateStr}`, { x: margin + 575, y: yCursor - 17, size: 9, font: fontBold });
 
-    yCursor -= 26;
+    // Multi-line Address text starting at x: margin + 335
+    p.drawText('ADDRESS:', { x: margin + 335, y: yCursor - 17, size: 9.5, font: fontBold });
+    let addrLineY = yCursor - 17;
+    for (let i = 0; i < addrLines.length; i++) {
+      if (i === 0) {
+        p.drawText(addrLines[i], { x: margin + 395, y: addrLineY, size: 8.5, font: fontBold });
+      } else {
+        addrLineY -= 11;
+        p.drawText(addrLines[i], { x: margin + 335, y: addrLineY, size: 8.5, font: fontBold });
+      }
+    }
+
+    yCursor -= subheaderHeight;
 
     p.drawRectangle({
       x: margin,
       y: yCursor - 18,
       width: printableWidth,
       height: 18,
-      color: rgb(0.92, 0.92, 0.92),
-      borderColor: rgb(0.8, 0.8, 0.8),
+      borderColor: rgb(0, 0, 0),
       borderWidth: 1,
     });
 
@@ -411,6 +422,8 @@ const buildBarcodePages = (pdfDoc: PDFDocument, items: any[], font: any, fontBol
     }
 
     p.drawText(`Page ${pageIndex} of ${totalPages}`, { x: 841.89 - margin - 70, y: 10, size: 8, font, color: rgb(0.6, 0.6, 0.6) });
+
+    return yCursor - 18;
   };
 
   // Capacity: 15 Pull Lists per Page
@@ -420,32 +433,20 @@ const buildBarcodePages = (pdfDoc: PDFDocument, items: any[], font: any, fontBol
 
   for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
     const page = pdfDoc.addPage([841.89, 595.276]);
-    const { height } = page.getSize();
-    let yCursor = height - margin - 74;
     const colWidths = [35, 85, 150, 80, 130, 50, 261.89];
 
-    drawHeaderAndTableHeaders(page, pageNum, totalPages);
+    let yCursor = drawHeaderAndTableHeaders(page, pageNum, totalPages);
 
     const pageLimit = Math.min(currentItemIdx + rowsPerPage, items.length);
     for (let idx = currentItemIdx; idx < pageLimit; idx++) {
       const item = items[idx];
       const rowHeight = 28;
 
-      if (idx % 2 === 1) {
-        page.drawRectangle({
-          x: margin,
-          y: yCursor - rowHeight,
-          width: printableWidth,
-          height: rowHeight,
-          color: rgb(0.98, 0.98, 0.98),
-        });
-      }
-
       page.drawLine({
         start: { x: margin, y: yCursor - rowHeight },
         end: { x: margin + printableWidth, y: yCursor - rowHeight },
         thickness: 0.5,
-        color: rgb(0.85, 0.85, 0.85),
+        color: rgb(0, 0, 0),
       });
 
       let xBorderCursor = margin;
@@ -454,7 +455,7 @@ const buildBarcodePages = (pdfDoc: PDFDocument, items: any[], font: any, fontBol
           start: { x: xBorderCursor, y: yCursor },
           end: { x: xBorderCursor, y: yCursor - rowHeight },
           thickness: 0.5,
-          color: rgb(0.85, 0.85, 0.85),
+          color: rgb(0, 0, 0),
         });
         if (i < colWidths.length) xBorderCursor += colWidths[i];
       }
@@ -516,12 +517,12 @@ export const printChallan = async (dispatch: any, _items: any[]): Promise<{ succ
     logAudit('PRINT_CHALLAN', `Generated Challan PDF for DC ${dispatch.dc_no || 'DRAFT'}`);
 
     try {
-      const printOptions: any = {};
+      const printOptions: any = { copies: 1 };
       if (settings.printer && settings.printer !== 'Default') {
         printOptions.printer = settings.printer;
       }
       await printPdf(destPath, printOptions);
-      console.log('Successfully sent Challan PDF to printer:', settings.printer || 'Default');
+      console.log('Successfully sent Challan PDF (1 copy) to printer:', settings.printer || 'Default');
     } catch (printErr) {
       console.error('Direct printing failed. Falling back to open file:', printErr);
       await shell.openPath(destPath);
@@ -557,12 +558,12 @@ export const printBarcodes = async (items: any[]): Promise<{ success: boolean; f
     logAudit('PRINT_BARCODES', `Generated Barcode sheet PDF with ${items.length} items`);
 
     try {
-      const printOptions: any = {};
+      const printOptions: any = { copies: 1 };
       if (settings.barcodePrinter && settings.barcodePrinter !== 'Default') {
         printOptions.printer = settings.barcodePrinter;
       }
       await printPdf(destPath, printOptions);
-      console.log('Successfully sent Barcodes PDF to printer:', settings.barcodePrinter || 'Default');
+      console.log('Successfully sent Barcodes PDF (1 copy) to printer:', settings.barcodePrinter || 'Default');
     } catch (printErr) {
       console.error('Direct barcode printing failed. Falling back to open file:', printErr);
       await shell.openPath(destPath);
@@ -600,7 +601,7 @@ export const printCombinedDispatch = async (dispatch: any, items: any[]): Promis
 
     try {
       const printOptions: any = {
-        copies: 3,
+        copies: 6,
         side: 'simplex',
       };
       const printerName = settings.printer && settings.printer !== 'Default'

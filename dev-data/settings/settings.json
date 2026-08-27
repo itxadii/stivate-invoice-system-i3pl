@@ -10,6 +10,7 @@
   "addressesList": [
     "JABIL CURCUIT INDIA PVT LTD (EHTP UNIT)\nPLOT NO-B-26, Ranjangaon MIDC\nTal- Shirur, Dist- Pune 412209",
     "Jabil",
+    "xyz and this is the adress that is used to the most",
     "AS PER LIST"
   ],
   "suppliersList": [
@@ -28,13 +29,20 @@
   ],
   "vehiclesList": [
     "MH-12-QW-1234",
-    "MH-14-ER-5678"
+    "MH-14-ER-5678",
+    "MH-151515"
+  ],
+  "vehicleSizesList": [
+    "32 ft",
+    "20 ft",
+    "10 ft"
   ],
   "defaultAddress": "Jabil",
   "defaultSupplier": "MAHADEV",
   "defaultScanner": "PRASAD",
   "defaultVerifier": "AMOL",
-  "defaultVehicleNo": "",
-  "warehouseLocation": "F W H",
-  "lastCloudBackupTime": 1787344049529
+  "defaultVehicleNo": "MH-12-QW-1234",
+  "defaultVehicleSize": "32 ft",
+  "warehouseLocation": "F Warehouse",
+  "lastCloudBackupTime": 1787832550862
 }

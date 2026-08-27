@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3';
 import * as path from 'path';
 import * as fs from 'fs';
-import { loadSettings } from './settings';
+import { loadSettings, saveSettings } from './settings';
 
 let dbInstance: any | null = null;
 let currentDbPath = '';
@@ -55,7 +55,8 @@ const initializeSchema = (db: any) => {
       transaction_type TEXT,
       created_by TEXT NOT NULL,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-      status TEXT DEFAULT 'loading'
+      status TEXT DEFAULT 'loading',
+      vehicle_size TEXT DEFAULT '32 ft'
     );
 
     CREATE TABLE IF NOT EXISTS dispatch_items (
@@ -100,6 +101,15 @@ const initializeSchema = (db: any) => {
 
   // Migrate columns for older databases
   try {
+    const pragma = db.prepare("PRAGMA table_info(dispatches)").all() as any[];
+    const hasCol = pragma.some((c: any) => c.name === 'vehicle_size');
+    if (!hasCol) {
+      db.exec("ALTER TABLE dispatches ADD COLUMN vehicle_size TEXT DEFAULT '32 ft'");
+    }
+  } catch (e) {
+    console.error('Failed to add vehicle_size column migration:', e);
+  }
+  try {
     db.exec(`ALTER TABLE dispatches ADD COLUMN particular TEXT DEFAULT 'AS PER LIST';`);
   } catch (e) {}
   try {
@@ -139,14 +149,30 @@ export const logAudit = (action: string, description: string) => {
   }
 };
 
-// DC Number generator
+// Short & Unique DC Number generator (Format: DC-YYMMDD-001)
 export const generateDCNumber = (dateStr: string): string => {
   const db = getDb();
   try {
-    const cleanDate = dateStr.replace(/-/g, ''); // YYYYMMDD
+    let cleanDate = (dateStr || '').replace(/[^0-9]/g, '');
+    if (cleanDate.length >= 8) {
+      // Convert YYYYMMDD to YYMMDD
+      const yy = cleanDate.substring(2, 4);
+      const mm = cleanDate.substring(4, 6);
+      const dd = cleanDate.substring(6, 8);
+      cleanDate = `${yy}${mm}${dd}`;
+    } else if (cleanDate.length < 6) {
+      const dObj = new Date();
+      const yy = String(dObj.getFullYear()).slice(-2);
+      const mm = String(dObj.getMonth() + 1).padStart(2, '0');
+      const dd = String(dObj.getDate()).padStart(2, '0');
+      cleanDate = `${yy}${mm}${dd}`;
+    } else {
+      cleanDate = cleanDate.substring(0, 6);
+    }
+
     const prefix = `DC-${cleanDate}-`;
     
-    // Find all existing dispatches starting with this prefix
+    // Find all existing dispatches matching this prefix
     const rows = db.prepare('SELECT dc_no FROM dispatches WHERE dc_no LIKE ?').all(`${prefix}%`) as { dc_no: string }[];
     
     let maxSeq = 0;
@@ -158,11 +184,12 @@ export const generateDCNumber = (dateStr: string): string => {
       }
     }
     
-    // Ensure the generated DC number is unique
+    // Generate next unique sequence number (e.g., 001, 002, 010...)
     let nextSeq = maxSeq + 1;
     const existsStmt = db.prepare('SELECT COUNT(*) as count FROM dispatches WHERE dc_no = ?');
     while (true) {
-      const checkVal = `${prefix}${nextSeq.toString().padStart(4, '0')}`;
+      const seqStr = nextSeq < 1000 ? nextSeq.toString().padStart(3, '0') : nextSeq.toString();
+      const checkVal = `${prefix}${seqStr}`;
       const row = existsStmt.get(checkVal) as { count: number };
       if (row && row.count === 0) {
         return checkVal;
@@ -171,11 +198,17 @@ export const generateDCNumber = (dateStr: string): string => {
     }
   } catch (e) {
     console.error('Failed to generate DC number, falling back:', e);
-    const cleanDate = dateStr.replace(/-/g, ''); // YYYYMMDD
+    const dObj = new Date();
+    const yy = String(dObj.getFullYear()).slice(-2);
+    const mm = String(dObj.getMonth() + 1).padStart(2, '0');
+    const dd = String(dObj.getDate()).padStart(2, '0');
+    const cleanDate = `${yy}${mm}${dd}`;
+    const prefix = `DC-${cleanDate}-`;
     let seq = 1;
     const existsStmt = db.prepare('SELECT COUNT(*) as count FROM dispatches WHERE dc_no = ?');
     while (true) {
-      const checkVal = `DC-${cleanDate}-${seq.toString().padStart(4, '0')}`;
+      const seqStr = seq < 1000 ? seq.toString().padStart(3, '0') : seq.toString();
+      const checkVal = `${prefix}${seqStr}`;
       const row = existsStmt.get(checkVal) as { count: number };
       if (row && row.count === 0) {
         return checkVal;
@@ -205,7 +238,7 @@ export const saveDispatch = (dispatch: any, items: any[]) => {
       db.prepare(`
         UPDATE dispatches
         SET date = ?, vehicle_no = ?, supplier_name = ?, address = ?, total_pallets = ?, total_parts = ?, created_by = ?,
-            particular = ?, scanning_by = ?, verify_by = ?, transaction_type = ?, status = ?
+            particular = ?, scanning_by = ?, verify_by = ?, transaction_type = ?, status = ?, vehicle_size = ?
         WHERE id = ?
       `).run(
         dispatch.date,
@@ -220,6 +253,7 @@ export const saveDispatch = (dispatch: any, items: any[]) => {
         dispatch.verify_by || '',
         dispatch.transaction_type || '',
         dispatch.status || 'loading',
+        dispatch.vehicle_size || '32 ft',
         dispatchId
       );
 
@@ -232,8 +266,8 @@ export const saveDispatch = (dispatch: any, items: any[]) => {
       }
       const result = db.prepare(`
         INSERT INTO dispatches (dc_no, date, vehicle_no, supplier_name, address, total_pallets, total_parts, created_by,
-                               particular, scanning_by, verify_by, transaction_type, status)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                               particular, scanning_by, verify_by, transaction_type, status, vehicle_size)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         dcNo,
         dispatch.date,
@@ -247,7 +281,8 @@ export const saveDispatch = (dispatch: any, items: any[]) => {
         dispatch.scanning_by || '',
         dispatch.verify_by || '',
         dispatch.transaction_type || '',
-        dispatch.status || 'loading'
+        dispatch.status || 'loading',
+        dispatch.vehicle_size || '32 ft'
       );
       dispatchId = result.lastInsertRowid;
     }
@@ -273,6 +308,26 @@ export const saveDispatch = (dispatch: any, items: any[]) => {
       dispatch.id ? 'UPDATE_DISPATCH' : 'CREATE_DISPATCH',
       `Saved dispatch ${dcNo} with ${items.length} items.`
     );
+
+    // Auto-add new vehicle number to database settings dropdown if not already present
+    if (dispatch.vehicle_no) {
+      try {
+        const cleanVehicleNo = String(dispatch.vehicle_no).trim().toUpperCase();
+        if (cleanVehicleNo) {
+          const currentSettings = loadSettings();
+          const vehicles = currentSettings.vehiclesList || [];
+          if (!vehicles.some((v: string) => String(v).trim().toUpperCase() === cleanVehicleNo)) {
+            const updatedVehicles = [...vehicles, cleanVehicleNo];
+            saveSettings({
+              ...currentSettings,
+              vehiclesList: updatedVehicles,
+            });
+          }
+        }
+      } catch (e) {
+        console.error('Failed to auto-save new vehicle number to settings:', e);
+      }
+    }
 
     return { id: dispatchId, dc_no: dcNo };
   });

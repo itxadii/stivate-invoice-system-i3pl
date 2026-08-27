@@ -11,11 +11,13 @@ export interface AppSettings {
   scannersList: string[];
   verifiersList: string[];
   vehiclesList: string[];
+  vehicleSizesList?: string[];
   defaultAddress: string;
   defaultSupplier: string;
   defaultScanner: string;
   defaultVerifier: string;
   defaultVehicleNo: string;
+  defaultVehicleSize?: string;
   warehouseLocation?: string;
   lastCloudBackupTime?: number;
 }
@@ -25,6 +27,7 @@ export interface Dispatch {
   dc_no: string;
   date: string;
   vehicle_no: string;
+  vehicle_size?: string;
   supplier_name: string;
   address: string;
   total_pallets: number;
@@ -38,6 +41,24 @@ export interface Dispatch {
   status?: 'loading' | 'ready' | 'completed';
   items?: DispatchItem[];
 }
+
+export const DEFAULT_VEHICLE_SIZES = ['32 ft', '20 ft', '10 ft'];
+
+export const getVehicleMaxPallets = (vehicleSize?: string): number => {
+  if (!vehicleSize) return 16;
+  const norm = vehicleSize.toLowerCase().trim();
+  if (norm.includes('32')) return 16;
+  if (norm.includes('20')) return 8;
+  if (norm.includes('10')) return 2;
+  const match = norm.match(/(\d+)/);
+  if (match) {
+    const ft = parseInt(match[1], 10);
+    if (!isNaN(ft) && ft > 0) {
+      return Math.max(1, Math.floor(ft / 2));
+    }
+  }
+  return 16;
+};
 
 export interface DispatchItem {
   id?: number;

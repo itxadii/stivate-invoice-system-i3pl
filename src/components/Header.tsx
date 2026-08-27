@@ -1,13 +1,14 @@
 import React, { useEffect, useState } from 'react';
-import { Database, Clock, WifiOff } from 'lucide-react';
+import { Database, Clock, WifiOff, Menu } from 'lucide-react';
 import { databaseService } from '../services/ipc';
 
 interface HeaderProps {
   title: string;
   companyName: string;
+  onToggleMobileSidebar?: () => void;
 }
 
-export const Header: React.FC<HeaderProps> = ({ title, companyName }) => {
+export const Header: React.FC<HeaderProps> = ({ title, companyName, onToggleMobileSidebar }) => {
   const [time, setTime] = useState<string>('');
   const [dbActive, setDbActive] = useState<boolean>(true);
 
@@ -37,11 +38,20 @@ export const Header: React.FC<HeaderProps> = ({ title, companyName }) => {
   }, []);
 
   return (
-    <header className="bg-white border-b border-slate-200 h-16 px-4 sm:px-6 flex items-center justify-between select-none">
+    <header className="bg-white border-b border-slate-200 h-16 px-3 sm:px-6 flex items-center justify-between select-none shrink-0 gap-2">
       <div className="flex items-center gap-2 sm:gap-4 min-w-0">
-        <h2 className="text-lg sm:text-xl font-bold text-slate-800 leading-none whitespace-nowrap truncate">{title}</h2>
+        {onToggleMobileSidebar && (
+          <button
+            onClick={onToggleMobileSidebar}
+            className="md:hidden p-2 text-slate-600 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+            aria-label="Open Navigation"
+          >
+            <Menu size={22} />
+          </button>
+        )}
+        <h2 className="text-base sm:text-lg md:text-xl font-bold text-slate-800 leading-none whitespace-nowrap truncate">{title}</h2>
         <div className="h-4 w-px bg-slate-200 hidden sm:block flex-shrink-0" />
-        <span className="text-sm font-semibold text-slate-500 hidden md:inline whitespace-nowrap truncate">{companyName}</span>
+        <span className="text-xs sm:text-sm font-semibold text-slate-500 hidden md:inline whitespace-nowrap truncate">{companyName}</span>
       </div>
 
       <div className="flex items-center gap-2 sm:gap-4 flex-shrink-0">
