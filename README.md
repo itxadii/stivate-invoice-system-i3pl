@@ -173,5 +173,4 @@ npx electron-builder --publish always
 ## 🏢 Owner & License Information
 
 - **Provider:** **Stivate** (https://stivate.com)
-- **Client:** **I3PL India Pvt Ltd**
 - **License:** Proprietary - All rights reserved. Authorized commercial deployment only.
