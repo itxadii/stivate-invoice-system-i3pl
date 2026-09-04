@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { settingsService, backupService, updaterService } from '../services/ipc';
 import type { AppSettings } from '../types';
-import { Save, Database, HardDriveDownload, Sparkles, FolderOpen, RefreshCcw, Cloud, BookOpen, HelpCircle, Keyboard, ShieldCheck, FileText, Lock } from 'lucide-react';
+import { Save, Database, HardDriveDownload, Sparkles, FolderOpen, RefreshCcw, Cloud, BookOpen, HelpCircle, Keyboard, ShieldCheck, FileText, Lock, Unlock, Key, Eye, EyeOff, Clock, CloudUpload, CloudDownload } from 'lucide-react';
 import { Modal } from '../components/Modal';
 import { AnimatedStatusButton } from '../components/animations';
 import type { ButtonStatus } from '../components/animations';
@@ -44,6 +44,14 @@ export const Settings: React.FC<SettingsProps> = ({ onSettingsSaved }) => {
   const [backupMsg, setBackupMsg] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
   const [backingUp, setBackingUp] = useState(false);
   const [uploadingCloud, setUploadingCloud] = useState(false);
+  const [uploadingLive, setUploadingLive] = useState(false);
+  const [restoring, setRestoring] = useState(false);
+  const [restoringCloud, setRestoringCloud] = useState(false);
+  const [isUnlocked, setIsUnlocked] = useState(false);
+  const [showUnlockModal, setShowUnlockModal] = useState(false);
+  const [passwordInput, setPasswordInput] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [passError, setPassError] = useState('');
   const [currentVersion, setCurrentVersion] = useState('1.0.0');
   const [updateStatus, setUpdateStatus] = useState<string | null>(null);
   const [checkingForUpdates, setCheckingForUpdates] = useState(false);
@@ -204,6 +212,10 @@ export const Settings: React.FC<SettingsProps> = ({ onSettingsSaved }) => {
       const res = await backupService.triggerBackup();
       if (res.success) {
         setBackupMsg({ text: res.message, type: 'success' });
+        try {
+          const reloaded = await settingsService.load();
+          setSettings(reloaded);
+        } catch {}
       } else {
         setBackupMsg({ text: `Backup Failed: ${res.message}`, type: 'error' });
       }
@@ -214,6 +226,27 @@ export const Settings: React.FC<SettingsProps> = ({ onSettingsSaved }) => {
     }
   };
 
+  const handleUploadLiveState = async () => {
+    setUploadingLive(true);
+    setBackupMsg(null);
+    try {
+      const res = await backupService.uploadLiveStateCloud();
+      if (res.success) {
+        setBackupMsg({ text: res.message, type: 'success' });
+        try {
+          const reloaded = await settingsService.load();
+          setSettings(reloaded);
+        } catch {}
+      } else {
+        setBackupMsg({ text: `Live State Upload Failed: ${res.message}`, type: 'error' });
+      }
+    } catch (err: any) {
+      setBackupMsg({ text: `Error: ${err.message || err}`, type: 'error' });
+    } finally {
+      setUploadingLive(false);
+    }
+  };
+
   const handleUploadToCloud = async () => {
     setUploadingCloud(true);
     setBackupMsg(null);
@@ -221,6 +254,10 @@ export const Settings: React.FC<SettingsProps> = ({ onSettingsSaved }) => {
       const res = await backupService.uploadCloud();
       if (res.success) {
         setBackupMsg({ text: res.message, type: 'success' });
+        try {
+          const reloaded = await settingsService.load();
+          setSettings(reloaded);
+        } catch {}
       } else {
         setBackupMsg({ text: `Cloud Backup Failed: ${res.message}`, type: 'error' });
       }
@@ -228,6 +265,56 @@ export const Settings: React.FC<SettingsProps> = ({ onSettingsSaved }) => {
       setBackupMsg({ text: `Error: ${err.message || err}`, type: 'error' });
     } finally {
       setUploadingCloud(false);
+    }
+  };
+
+  const handleRestoreCloudLatest = async () => {
+    const confirm = window.confirm(
+      'Are you sure you want to download and restore the LIVE database from AWS S3 (latest.db)?\\n\\nYour current database will be safely backed up locally first, and your records will be restored up to the latest hourly cloud sync.'
+    );
+    if (!confirm) return;
+
+    setRestoringCloud(true);
+    setBackupMsg(null);
+    try {
+      const res = await backupService.restoreCloudLatest();
+      if (res.success) {
+        setBackupMsg({ text: res.message, type: 'success' });
+        setTimeout(() => {
+          window.location.reload();
+        }, 1500);
+      } else {
+        setBackupMsg({ text: `Cloud Restore Failed: ${res.message}`, type: 'error' });
+      }
+    } catch (err: any) {
+      setBackupMsg({ text: `Error: ${err.message || err}`, type: 'error' });
+    } finally {
+      setRestoringCloud(false);
+    }
+  };
+
+  const handleRestoreBackup = async () => {
+    const confirm = window.confirm(
+      'Are you sure you want to restore the latest database backup?\\n\\nYour current database will be safely preserved as a backup, and the latest backup will restore your active records.'
+    );
+    if (!confirm) return;
+
+    setRestoring(true);
+    setBackupMsg(null);
+    try {
+      const res = await backupService.restoreBackup();
+      if (res.success) {
+        setBackupMsg({ text: res.message, type: 'success' });
+        setTimeout(() => {
+          window.location.reload();
+        }, 1200);
+      } else {
+        setBackupMsg({ text: `Restore Failed: ${res.message}`, type: 'error' });
+      }
+    } catch (err: any) {
+      setBackupMsg({ text: `Error: ${err.message || err}`, type: 'error' });
+    } finally {
+      setRestoring(false);
     }
   };
 
@@ -261,14 +348,59 @@ export const Settings: React.FC<SettingsProps> = ({ onSettingsSaved }) => {
 
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Left Form Column */}
-        <form onSubmit={handleSave} className="lg:col-span-2 bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-6">
-          <h3 className="text-md font-bold text-slate-700 uppercase tracking-wider flex items-center gap-2">
-            <Sparkles size={16} className="text-emerald-500" />
-            Application Settings
-          </h3>
+      {/* Top Header & Lock Status */}
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pb-4 border-b border-slate-200">
+        <div>
+          <div className="flex items-center gap-2.5">
+            <h2 className="text-xl font-black text-slate-800 tracking-tight">
+              {isUnlocked ? 'System Settings & Logistics Master' : 'Logistics Dropdown Options'}
+            </h2>
+            {isUnlocked ? (
+              <span className="text-[11px] px-2.5 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full font-bold flex items-center gap-1">
+                <Unlock size={12} /> Admin Unlocked
+              </span>
+            ) : (
+              <span className="text-[11px] px-2.5 py-0.5 bg-amber-50 text-amber-700 border border-amber-200 rounded-full font-bold flex items-center gap-1">
+                <Lock size={12} /> Protected Mode
+              </span>
+            )}
+          </div>
+          <p className="text-xs text-slate-500 mt-1">
+            {isUnlocked
+              ? 'Full administrator mode active. Company details, printers, database backups, and updates are unlocked.'
+              : 'Customize dropdown lists for consignee addresses, supervisors, scanning operators, verifiers, and vehicle masters.'}
+          </p>
+        </div>
 
+        <div>
+          {isUnlocked ? (
+            <button
+              type="button"
+              onClick={() => {
+                setIsUnlocked(false);
+                setPasswordInput('');
+              }}
+              className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl flex items-center gap-1.5 transition-colors cursor-pointer border border-slate-300 shadow-sm"
+            >
+              <Lock size={13} />
+              <span>Lock Advanced Settings</span>
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setShowUnlockModal(true)}
+              className="px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 transition-colors cursor-pointer shadow-sm"
+            >
+              <Key size={13} className="text-amber-400" />
+              <span>Unlock All Settings</span>
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div className={`grid grid-cols-1 ${isUnlocked ? 'lg:grid-cols-3' : 'grid-cols-1'} gap-6`}>
+        {/* Left Form Column */}
+        <form onSubmit={handleSave} className={`${isUnlocked ? 'lg:col-span-2' : 'col-span-1'} bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-6`}>
           {message && (
             <div className={`p-4 rounded-lg border text-sm font-semibold ${message.type === 'success'
               ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
@@ -278,120 +410,137 @@ export const Settings: React.FC<SettingsProps> = ({ onSettingsSaved }) => {
             </div>
           )}
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-1 md:col-span-2">
-              <label className="text-xs font-bold text-slate-500 uppercase">Company Name</label>
-              <input
-                type="text"
-                name="companyName"
-                value={settings.companyName}
-                onChange={handleChange}
-                required
-                className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-slate-50 focus:outline-none focus:border-emerald-500 focus:bg-white transition-colors"
-              />
-            </div>
+          {/* General Settings: Visible ONLY when unlocked with password i3pl@123 */}
+          {isUnlocked && (
+            <>
+              <h3 className="text-md font-bold text-slate-700 uppercase tracking-wider flex items-center gap-2">
+                <Sparkles size={16} className="text-emerald-500" />
+                Company Profile & Printer Setup
+              </h3>
 
-            <div className="space-y-1 md:col-span-2">
-              <label className="text-xs font-bold text-slate-500 uppercase">Company Address</label>
-              <textarea
-                name="address"
-                value={settings.address}
-                onChange={handleChange}
-                rows={2}
-                required
-                className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-slate-50 focus:outline-none focus:border-emerald-500 focus:bg-white transition-colors"
-              />
-            </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-1 md:col-span-2">
+                  <label className="text-xs font-bold text-slate-500 uppercase">Company Name</label>
+                  <input
+                    type="text"
+                    name="companyName"
+                    value={settings.companyName}
+                    onChange={handleChange}
+                    required
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-slate-50 focus:outline-none focus:border-emerald-500 focus:bg-white transition-colors"
+                  />
+                </div>
 
-            <div className="space-y-1 md:col-span-2">
-              <label className="text-xs font-bold text-slate-500 uppercase">Warehouse Location / Header Prefix</label>
-              <input
-                type="text"
-                name="warehouseLocation"
-                value={settings.warehouseLocation || ''}
-                onChange={handleChange}
-                placeholder="e.g. F W H or FORWARD WAREHOUSE or MAIN WAREHOUSE"
-                className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-slate-50 focus:outline-none focus:border-[#4BB8FA] focus:bg-white transition-colors font-medium"
-              />
-              <p className="text-[11px] text-slate-400">
-                Sets the location prefix printed on Challan PDF headers (e.g. <strong>{settings.warehouseLocation || 'F W H'}</strong> TO [Consignee Name]).
-              </p>
-            </div>
+                <div className="space-y-1 md:col-span-2">
+                  <label className="text-xs font-bold text-slate-500 uppercase">Company Address</label>
+                  <textarea
+                    name="address"
+                    value={settings.address}
+                    onChange={handleChange}
+                    rows={2}
+                    required
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-slate-50 focus:outline-none focus:border-emerald-500 focus:bg-white transition-colors"
+                  />
+                </div>
 
-            <div className="space-y-1">
-              <label className="text-xs font-bold text-slate-500 uppercase">Default Document Printer</label>
-              <input
-                type="text"
-                name="printer"
-                value={settings.printer}
-                onChange={handleChange}
-                className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-slate-50 focus:outline-none focus:border-emerald-500 focus:bg-white transition-colors"
-              />
-            </div>
+                <div className="space-y-1 md:col-span-2">
+                  <label className="text-xs font-bold text-slate-500 uppercase">Warehouse Location / Header Prefix</label>
+                  <input
+                    type="text"
+                    name="warehouseLocation"
+                    value={settings.warehouseLocation || ''}
+                    onChange={handleChange}
+                    placeholder="e.g. F W H or FORWARD WAREHOUSE or MAIN WAREHOUSE"
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-slate-50 focus:outline-none focus:border-[#4BB8FA] focus:bg-white transition-colors font-medium"
+                  />
+                  <p className="text-[11px] text-slate-400">
+                    Sets the location prefix printed on Challan PDF headers (e.g. <strong>{settings.warehouseLocation || 'F W H'}</strong> TO [Consignee Name]).
+                  </p>
+                </div>
 
-            <div className="space-y-1">
-              <label className="text-xs font-bold text-slate-500 uppercase">Default Barcode Printer</label>
-              <input
-                type="text"
-                name="barcodePrinter"
-                value={settings.barcodePrinter}
-                onChange={handleChange}
-                className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-slate-50 focus:outline-none focus:border-emerald-500 focus:bg-white transition-colors"
-              />
-            </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-500 uppercase">Default Document Printer</label>
+                  <input
+                    type="text"
+                    name="printer"
+                    value={settings.printer}
+                    onChange={handleChange}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-slate-50 focus:outline-none focus:border-emerald-500 focus:bg-white transition-colors"
+                  />
+                </div>
 
-            <div className="space-y-1 md:col-span-2">
-              <label className="text-xs font-bold text-slate-500 uppercase flex items-center gap-1">
-                <Database size={13} className="text-slate-400" />
-                Database Storage Location
-              </label>
-              <input
-                type="text"
-                name="databaseLocation"
-                value={settings.databaseLocation}
-                readOnly
-                className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-slate-100 text-slate-500 font-mono text-[11px] cursor-not-allowed"
-                title="Managed automatically for security"
-              />
-              <p className="text-[10px] text-slate-400">Automatically managed in application data folder for security</p>
-            </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-500 uppercase">Default Barcode Printer</label>
+                  <input
+                    type="text"
+                    name="barcodePrinter"
+                    value={settings.barcodePrinter}
+                    onChange={handleChange}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-slate-50 focus:outline-none focus:border-emerald-500 focus:bg-white transition-colors"
+                  />
+                </div>
 
-            <div className="space-y-1 md:col-span-2">
-              <label className="text-xs font-bold text-slate-500 uppercase flex items-center gap-1">
-                <FolderOpen size={13} className="text-slate-400" />
-                Automatic Backup Folder
-              </label>
-              <input
-                type="text"
-                name="backupFolder"
-                value={settings.backupFolder}
-                readOnly
-                className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-slate-100 text-slate-500 font-mono text-[11px] cursor-not-allowed"
-                title="Managed automatically for security"
-              />
-              <p className="text-[10px] text-slate-400">Automatically managed in application data folder for security</p>
-            </div>
+                <div className="space-y-1 md:col-span-2">
+                  <label className="text-xs font-bold text-slate-500 uppercase flex items-center gap-1">
+                    <Database size={13} className="text-slate-400" />
+                    Database Storage Location
+                  </label>
+                  <input
+                    type="text"
+                    name="databaseLocation"
+                    value={settings.databaseLocation}
+                    readOnly
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-slate-100 text-slate-500 font-mono text-[11px] cursor-not-allowed"
+                    title="Managed automatically for security"
+                  />
+                  <p className="text-[10px] text-slate-400">Automatically managed in application data folder for security</p>
+                </div>
 
-            <div className="space-y-1 md:col-span-2">
-              <label className="text-xs font-bold text-slate-500 uppercase flex items-center gap-1">
-                <FolderOpen size={13} className="text-slate-400" />
-                Prints/PDF Saving Folder
-              </label>
-              <input
-                type="text"
-                name="printsFolder"
-                value={settings.printsFolder}
-                readOnly
-                className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-slate-100 text-slate-500 font-mono text-[11px] cursor-not-allowed"
-                title="Managed automatically for security"
-              />
-              <p className="text-[10px] text-slate-400">Automatically managed in application data folder for security</p>
-            </div>
+                <div className="space-y-1 md:col-span-2">
+                  <label className="text-xs font-bold text-slate-500 uppercase flex items-center gap-1">
+                    <FolderOpen size={13} className="text-slate-400" />
+                    Automatic Backup Folder
+                  </label>
+                  <input
+                    type="text"
+                    name="backupFolder"
+                    value={settings.backupFolder}
+                    readOnly
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-slate-100 text-slate-500 font-mono text-[11px] cursor-not-allowed"
+                    title="Managed automatically for security"
+                  />
+                  <p className="text-[10px] text-slate-400">Automatically managed in application data folder for security</p>
+                </div>
+
+                <div className="space-y-1 md:col-span-2">
+                  <label className="text-xs font-bold text-slate-500 uppercase flex items-center gap-1">
+                    <FolderOpen size={13} className="text-slate-400" />
+                    Prints/PDF Saving Folder
+                  </label>
+                  <input
+                    type="text"
+                    name="printsFolder"
+                    value={settings.printsFolder}
+                    readOnly
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-slate-100 text-slate-500 font-mono text-[11px] cursor-not-allowed"
+                    title="Managed automatically for security"
+                  />
+                  <p className="text-[10px] text-slate-400">Automatically managed in application data folder for security</p>
+                </div>
+              </div>
+
+              <hr className="border-slate-200" />
+            </>
+          )}
+
+          {/* Section: Logistics Dropdown Options (Always visible) */}
+          <div className="flex items-center justify-between">
+            <h4 className="text-xs font-extrabold text-slate-700 uppercase tracking-wider flex items-center gap-2">
+              <span>Logistics Dropdown Options</span>
+            </h4>
+            <span className="text-[11px] text-slate-400 font-medium">Auto-populates dropdown fields across New Dispatch</span>
           </div>
 
-          {/* Section: Custom Logistics Dropdowns */}
-          <hr className="border-slate-200" />
-          <h4 className="text-xs font-extrabold text-slate-400 uppercase tracking-wider">Logistics Dropdown Options</h4>
 
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6">
             {/* Addresses list */}
@@ -570,22 +719,62 @@ export const Settings: React.FC<SettingsProps> = ({ onSettingsSaved }) => {
               className="flex items-center gap-2 px-5 py-2.5 bg-[#4BB8FA] hover:bg-[#35a0dc] text-slate-900 rounded-lg text-sm font-bold cursor-pointer disabled:bg-slate-200 disabled:text-slate-400"
             >
               <Save size={16} />
-              <span>{saving ? 'Saving...' : 'Save Settings'}</span>
+              <span>{saving ? 'Saving...' : (isUnlocked ? 'Save All Settings' : 'Save Logistics Options')}</span>
             </button>
           </div>
         </form>
 
-        {/* Right Actions Column */}
-        <div className="space-y-6 flex flex-col h-full min-h-[300px]">
+        {/* Right Actions Column (Locked unless administrator unlocks with i3pl@123) */}
+        {isUnlocked && (
+          <div className="space-y-6 flex flex-col h-full min-h-[300px]">
           {/* Backup Operations */}
           <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-4">
-            <h4 className="text-sm font-bold text-slate-700 uppercase tracking-wider flex items-center gap-2">
-              <HardDriveDownload size={16} className="text-blue-500" />
-              Database Backups
-            </h4>
+            <div className="flex items-center justify-between">
+              <h4 className="text-sm font-bold text-slate-700 uppercase tracking-wider flex items-center gap-2">
+                <HardDriveDownload size={16} className="text-blue-500" />
+                Database Backups
+              </h4>
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+                Dual-Tier Active
+              </span>
+            </div>
+
             <p className="text-xs text-slate-500 leading-relaxed">
-              The database is backed up automatically every time you close the application. It preserves the latest 30 backups inside your configured Backup Folder.
+              Automated dual-tier backup protection:
             </p>
+
+            {/* Status Information Box */}
+            <div className="p-3 bg-slate-50 rounded-lg border border-slate-200 text-xs space-y-2">
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <div className="font-semibold text-slate-800 flex items-center gap-1.5">
+                    <Clock size={12} className="text-sky-500" />
+                    Hourly Live State (latest.db)
+                  </div>
+                  <div className="text-[11px] text-slate-500">Overwrites S3 single file • Zero extra storage cost</div>
+                </div>
+                <span className="text-[11px] font-medium text-slate-700 whitespace-nowrap">
+                  {settings.lastHourlyCloudBackupTime
+                    ? new Date(settings.lastHourlyCloudBackupTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                    : 'Pending'}
+                </span>
+              </div>
+
+              <div className="border-t border-slate-200/80 pt-2 flex items-start justify-between gap-2">
+                <div>
+                  <div className="font-semibold text-slate-800 flex items-center gap-1.5">
+                    <Cloud size={12} className="text-indigo-500" />
+                    3-Day Cloud Archive
+                  </div>
+                  <div className="text-[11px] text-slate-500">Timestamped snapshot history (keeps 30)</div>
+                </div>
+                <span className="text-[11px] font-medium text-slate-700 whitespace-nowrap">
+                  {settings.lastCloudBackupTime
+                    ? new Date(settings.lastCloudBackupTime).toLocaleDateString([], { month: 'short', day: 'numeric' })
+                    : 'Pending'}
+                </span>
+              </div>
+            </div>
 
             {backupMsg && (
               <div className={`p-3 rounded-lg text-xs font-semibold border ${backupMsg.type === 'success'
@@ -596,23 +785,71 @@ export const Settings: React.FC<SettingsProps> = ({ onSettingsSaved }) => {
               </div>
             )}
 
-            <button
-              onClick={handleTriggerBackup}
-              disabled={backingUp || uploadingCloud}
-              className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-lg text-sm font-bold cursor-pointer disabled:bg-slate-50 disabled:text-slate-400 disabled:border-slate-200 transition-colors"
-            >
-              <RefreshCcw size={15} className={backingUp ? 'animate-spin' : ''} />
-              <span>{backingUp ? 'Creating Backup...' : 'Trigger Backup Now'}</span>
-            </button>
+            {/* Cloud Live State Actions */}
+            <div className="space-y-2 pt-1">
+              <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                Cloud Live State (Zero Storage Cost)
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={handleUploadLiveState}
+                  disabled={uploadingLive || uploadingCloud || backingUp || restoring || restoringCloud}
+                  className="flex items-center justify-center gap-1.5 px-3 py-2.5 bg-sky-50 hover:bg-sky-100 text-sky-800 border border-sky-200 rounded-lg text-xs font-bold cursor-pointer disabled:bg-slate-50 disabled:text-slate-400 disabled:border-slate-200 transition-colors"
+                >
+                  <CloudUpload size={14} className={uploadingLive ? 'animate-bounce' : ''} />
+                  <span>{uploadingLive ? 'Syncing...' : 'Sync Live S3'}</span>
+                </button>
 
-            <button
-              onClick={handleUploadToCloud}
-              disabled={uploadingCloud || backingUp}
-              className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-[#4BB8FA] hover:bg-[#35a0dc] text-slate-900 rounded-lg text-sm font-bold cursor-pointer disabled:bg-slate-50 disabled:text-slate-400 disabled:border-slate-200 transition-colors"
-            >
-              <Cloud size={15} className={uploadingCloud ? 'animate-bounce' : ''} />
-              <span>{uploadingCloud ? 'Uploading...' : 'Upload Backup on Cloud'}</span>
-            </button>
+                <button
+                  type="button"
+                  onClick={handleRestoreCloudLatest}
+                  disabled={restoringCloud || restoring || uploadingLive || uploadingCloud || backingUp}
+                  className="flex items-center justify-center gap-1.5 px-3 py-2.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-800 border border-indigo-200 rounded-lg text-xs font-bold cursor-pointer disabled:bg-slate-50 disabled:text-slate-400 disabled:border-slate-200 transition-colors"
+                >
+                  <CloudDownload size={14} className={restoringCloud ? 'animate-spin' : ''} />
+                  <span>{restoringCloud ? 'Restoring...' : 'Restore Live S3'}</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Full Archive & Local Actions */}
+            <div className="space-y-2 pt-1 border-t border-slate-100">
+              <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                Historical Archive & Local
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={handleTriggerBackup}
+                  disabled={backingUp || uploadingCloud || uploadingLive || restoring || restoringCloud}
+                  className="flex items-center justify-center gap-1.5 px-3 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-lg text-xs font-bold cursor-pointer disabled:bg-slate-50 disabled:text-slate-400 disabled:border-slate-200 transition-colors"
+                >
+                  <RefreshCcw size={13} className={backingUp ? 'animate-spin' : ''} />
+                  <span>{backingUp ? 'Creating...' : 'Local Snapshot'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleUploadToCloud}
+                  disabled={uploadingCloud || uploadingLive || backingUp || restoring || restoringCloud}
+                  className="flex items-center justify-center gap-1.5 px-3 py-2 bg-[#4BB8FA] hover:bg-[#35a0dc] text-slate-900 rounded-lg text-xs font-bold cursor-pointer disabled:bg-slate-50 disabled:text-slate-400 disabled:border-slate-200 transition-colors"
+                >
+                  <Cloud size={13} className={uploadingCloud ? 'animate-bounce' : ''} />
+                  <span>{uploadingCloud ? 'Uploading...' : 'Cloud Archive'}</span>
+                </button>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleRestoreBackup}
+                disabled={restoring || restoringCloud || backingUp || uploadingCloud || uploadingLive}
+                className="w-full flex items-center justify-center gap-1.5 px-3 py-2 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 rounded-lg text-xs font-bold cursor-pointer disabled:bg-slate-50 disabled:text-slate-400 disabled:border-slate-200 transition-colors"
+              >
+                <HardDriveDownload size={13} className={restoring ? 'animate-spin' : ''} />
+                <span>{restoring ? 'Restoring...' : 'Restore Local Backup File'}</span>
+              </button>
+            </div>
           </div>
 
           {/* Application Updates */}
@@ -746,7 +983,95 @@ export const Settings: React.FC<SettingsProps> = ({ onSettingsSaved }) => {
             <img src="stivate.png" alt="Stivate Logo" className="h-24 sm:h-28 w-auto object-contain brightness-95 opacity-90 hover:opacity-100 transition-all duration-150" />
           </div>
         </div>
+      )}
       </div>
+
+      {/* Unlock Password Modal */}
+      {showUnlockModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-md overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+            <div className="p-6 text-center space-y-4">
+              <div className="mx-auto w-14 h-14 bg-amber-50 border border-amber-200 text-amber-600 rounded-2xl flex items-center justify-center shadow-inner">
+                <Lock size={28} />
+              </div>
+
+              <div>
+                <h3 className="text-lg font-black text-slate-800 uppercase tracking-tight">Unlock Advanced Settings</h3>
+                <p className="text-xs text-slate-500 mt-1">
+                  Enter administrator password to access company profile, printers, database backups, and system updates.
+                </p>
+              </div>
+
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  if (passwordInput === 'i3pl@123') {
+                    setIsUnlocked(true);
+                    setShowUnlockModal(false);
+                    setPasswordInput('');
+                    setPassError('');
+                  } else {
+                    setPassError('Invalid Password. Access Denied.');
+                  }
+                }}
+                className="space-y-4 text-left"
+              >
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-600 uppercase flex items-center gap-1.5">
+                    <Key size={13} className="text-slate-400" />
+                    Security Password
+                  </label>
+                  <div className="relative">
+                    <input
+                      type={showPassword ? 'text' : 'password'}
+                      value={passwordInput}
+                      onChange={(e) => {
+                        setPasswordInput(e.target.value);
+                        if (passError) setPassError('');
+                      }}
+                      placeholder="Enter password..."
+                      autoFocus
+                      className="w-full pl-4 pr-10 py-2.5 text-sm border border-slate-200 rounded-xl bg-slate-50 focus:outline-none focus:bg-white focus:border-[#4BB8FA] font-mono transition-all text-slate-800 font-bold"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
+                    >
+                      {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                    </button>
+                  </div>
+                  {passError && (
+                    <p className="text-xs font-bold text-rose-600 pt-1 flex items-center gap-1">
+                      <span>⚠</span> {passError}
+                    </p>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowUnlockModal(false);
+                      setPasswordInput('');
+                      setPassError('');
+                    }}
+                    className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl cursor-pointer transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="flex-1 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-xl cursor-pointer transition-colors shadow-sm"
+                  >
+                    Unlock Settings
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Privacy Policy, Security Policy, User Documentation & Feature Request Modal */}
       <Modal

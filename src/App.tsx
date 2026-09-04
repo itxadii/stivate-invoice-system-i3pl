@@ -53,8 +53,32 @@ function App() {
   }, []);
 
   // Global keyboard shortcuts
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('invoice_sidebar_collapsed') === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  const handleToggleSidebarCollapse = () => {
+    setIsSidebarCollapsed((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem('invoice_sidebar_collapsed', String(next));
+      } catch {}
+      return next;
+    });
+  };
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Ctrl + B: Toggle Sidebar
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'b') {
+        e.preventDefault();
+        handleToggleSidebarCollapse();
+      }
+
       // Ctrl + N: New Dispatch
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'n') {
         e.preventDefault();
@@ -110,13 +134,18 @@ function App() {
     <div className="flex h-screen w-screen overflow-hidden bg-slate-100 font-sans relative">
       {/* Desktop Sidebar */}
       <div className="hidden md:flex h-full">
-        <Sidebar activeTab={activeTab} setActiveTab={(tab) => {
-          if (tab !== 'new-dispatch') {
-            setEditDispatchId(null);
-          }
-          setPreviousTab(activeTab);
-          setActiveTab(tab);
-        }} />
+        <Sidebar
+          activeTab={activeTab}
+          setActiveTab={(tab) => {
+            if (tab !== 'new-dispatch') {
+              setEditDispatchId(null);
+            }
+            setPreviousTab(activeTab);
+            setActiveTab(tab);
+          }}
+          isCollapsed={isSidebarCollapsed}
+          onToggleCollapse={handleToggleSidebarCollapse}
+        />
       </div>
 
       {/* Mobile Drawer Backdrop & Sidebar */}

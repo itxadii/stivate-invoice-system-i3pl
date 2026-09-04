@@ -28,6 +28,7 @@ export interface AppSettings {
   defaultVehicleSize?: string;
   warehouseLocation?: string;
   lastCloudBackupTime?: number;
+  lastHourlyCloudBackupTime?: number;
 }
 
 /**

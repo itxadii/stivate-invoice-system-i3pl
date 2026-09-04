@@ -2,7 +2,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { databaseService, settingsService } from '../services/ipc';
 import type { Dispatch, PipelineStats } from '../types';
 import { getVehicleMaxPallets } from '../types';
-import { Play, CheckCircle, Clock, ClipboardList, Eye, Hourglass, Search, X, Plus, User } from 'lucide-react';
+import { Play, CheckCircle, Clock, ClipboardList, Eye, Hourglass, Search, X, Plus, User, Package, MapPin, Trash2, AlertTriangle } from 'lucide-react';
 import { Modal } from '../components/Modal';
 import { AnimatedStatusButton } from '../components/animations';
 import type { ButtonStatus } from '../components/animations';
@@ -21,23 +21,6 @@ const getNowDateTimeString = () => {
   const hours = String(now.getHours()).padStart(2, '0');
   const minutes = String(now.getMinutes()).padStart(2, '0');
   return `${year}-${month}-${day}T${hours}:${minutes}`;
-};
-
-const formatDateTimeDisplay = (dateStr: string) => {
-  if (!dateStr) return '';
-  try {
-    const norm = dateStr.includes('T') ? dateStr : dateStr.replace(' ', 'T');
-    const dObj = new Date(norm);
-    if (!isNaN(dObj.getTime())) {
-      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-      let hours = dObj.getHours();
-      const ampm = hours >= 12 ? 'PM' : 'AM';
-      hours = hours % 12 || 12;
-      const mins = String(dObj.getMinutes()).padStart(2, '0');
-      return `${dObj.getDate()}-${months[dObj.getMonth()]}-${dObj.getFullYear().toString().slice(-2)} ${String(hours).padStart(2, '0')}:${mins} ${ampm}`;
-    }
-  } catch (e) { }
-  return dateStr;
 };
 
 export const DispatchPipeline: React.FC<DispatchPipelineProps> = ({
@@ -64,6 +47,12 @@ export const DispatchPipeline: React.FC<DispatchPipelineProps> = ({
   // New Dispatch Popup Modal State
   const [isNewModalOpen, setIsNewModalOpen] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+
+  // Delete Dispatch Modal & Feedback State
+  const [deleteTarget, setDeleteTarget] = useState<{ id: number; dc_no: string } | null>(null);
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [feedbackMessage, setFeedbackMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
   const [newDispatch, setNewDispatch] = useState({
     dc_no: '',
     date: getNowDateTimeString(),
@@ -79,6 +68,7 @@ export const DispatchPipeline: React.FC<DispatchPipelineProps> = ({
     transaction_type: '',
     created_by: 'Operator',
     status: 'loading' as const,
+    is_empty_pallets: false,
   });
 
   const fetchPipelineData = useCallback(async () => {
@@ -146,7 +136,9 @@ export const DispatchPipeline: React.FC<DispatchPipelineProps> = ({
       vehicle_no: settings?.defaultVehicleNo || '',
       vehicle_size: '32 ft',
       supplier_name: settings?.defaultSupplier || '',
-      address: settings?.defaultAddress || 'AS PER LIST',
+      address: (settings?.defaultAddress && settings.defaultAddress.toUpperCase() !== 'AS PER LIST')
+        ? settings.defaultAddress
+        : (settings?.addressesList?.find((a: string) => a && a.toUpperCase() !== 'AS PER LIST') || settings?.defaultAddress || ''),
       total_pallets: 1,
       total_parts: 0,
       particular: 'AS PER LIST',
@@ -155,17 +147,26 @@ export const DispatchPipeline: React.FC<DispatchPipelineProps> = ({
       transaction_type: '',
       created_by: 'Operator',
       status: 'loading' as const,
+      is_empty_pallets: false,
     });
     setFormError(null);
     setIsNewModalOpen(true);
   };
 
   const handleNewDispatchChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
-    const { name, value } = e.target;
-    setNewDispatch((prev) => ({
-      ...prev,
-      [name]: name === 'total_pallets' ? Number(value) : value
-    }));
+    const { name, value, type } = e.target as HTMLInputElement;
+    if (type === 'checkbox') {
+      const checked = (e.target as HTMLInputElement).checked;
+      setNewDispatch((prev) => ({
+        ...prev,
+        [name]: checked,
+      }));
+    } else {
+      setNewDispatch((prev) => ({
+        ...prev,
+        [name]: name === 'total_pallets' ? Number(value) : value
+      }));
+    }
   };
 
   const [createStatus, setCreateStatus] = useState<ButtonStatus>('idle');
@@ -213,6 +214,31 @@ export const DispatchPipeline: React.FC<DispatchPipelineProps> = ({
       setCreateStatus('error');
       setFormError(`Creation failed: ${err.message || err}`);
       setTimeout(() => setCreateStatus('idle'), 1500);
+    }
+  };
+
+  const handleDeleteDispatch = async () => {
+    if (!deleteTarget) return;
+    setIsDeleting(true);
+    try {
+      const success = await databaseService.deleteDispatch(deleteTarget.id);
+      if (success) {
+        setFeedbackMessage({ text: `Dispatch ${deleteTarget.dc_no} deleted successfully.`, type: 'success' });
+        setIsDeleteModalOpen(false);
+        setDeleteTarget(null);
+        await fetchPipelineData();
+        setTimeout(() => setFeedbackMessage(null), 3500);
+      } else {
+        setFeedbackMessage({ text: 'Cannot delete: Dispatched delivery challans are permanently locked.', type: 'error' });
+        setIsDeleteModalOpen(false);
+        setDeleteTarget(null);
+        setTimeout(() => setFeedbackMessage(null), 4000);
+      }
+    } catch (err: any) {
+      console.error('Delete dispatch failed:', err);
+      setFeedbackMessage({ text: `Failed to delete dispatch: ${err.message || err}`, type: 'error' });
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -306,6 +332,19 @@ export const DispatchPipeline: React.FC<DispatchPipelineProps> = ({
           );
         })}
       </div>
+
+      {/* Feedback Alert Banner */}
+      {feedbackMessage && (
+        <div
+          className={`p-4 rounded-xl text-sm font-semibold border ${
+            feedbackMessage.type === 'success'
+              ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+              : 'bg-rose-50 text-rose-800 border-rose-200'
+          }`}
+        >
+          {feedbackMessage.text}
+        </div>
+      )}
 
       {/* Main Pipeline Table with Search & Filter Bar */}
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
@@ -431,12 +470,17 @@ export const DispatchPipeline: React.FC<DispatchPipelineProps> = ({
               <thead className="bg-slate-50">
                 <tr>
                   <th className="px-6 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">DC Number</th>
+                  <th className="px-6 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Destination Address</th>
                   <th className="px-6 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Vehicle No</th>
                   <th className="px-6 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Supervisor</th>
-                  <th className="px-6 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Date & Time</th>
                   <th className="px-6 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Pull List Progress</th>
                   <th className="px-6 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Status</th>
-                  <th className="px-6 py-3 text-center text-xs font-bold text-slate-500 uppercase tracking-wider w-32">Actions</th>
+                  <th className="px-6 py-3 text-xs font-bold text-slate-500 uppercase tracking-wider w-36">
+                    <div className="flex items-center justify-center gap-1.5">
+                      <span className="w-[74px] text-center">Actions</span>
+                      <span className="w-[29px] shrink-0"></span>
+                    </div>
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 bg-white">
@@ -448,7 +492,28 @@ export const DispatchPipeline: React.FC<DispatchPipelineProps> = ({
                   return (
                     <tr key={d.id} className="hover:bg-slate-50/50 transition-colors duration-100">
                       <td className="px-6 py-4 whitespace-nowrap text-sm font-mono font-bold text-slate-800">
-                        {d.dc_no}
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span>{d.dc_no}</span>
+                          {Boolean(d.is_empty_pallets) && (
+                            <span className="px-1.5 py-0.5 rounded text-[10px] font-black uppercase tracking-wider bg-amber-100 text-amber-800 border border-amber-300 shadow-2xs">
+                              Empty Return
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 text-sm text-slate-700 max-w-[220px]">
+                        <div
+                          className="font-bold text-slate-800 line-clamp-1 truncate flex items-center gap-1.5"
+                          title={d.address || 'No destination address specified'}
+                        >
+                          <MapPin size={13} className="text-slate-400 shrink-0" />
+                          <span className="truncate">{d.address ? d.address.split('\n')[0] : '-'}</span>
+                        </div>
+                        {d.address && d.address.includes('\n') && (
+                          <div className="text-[10px] text-slate-400 truncate mt-0.5" title={d.address}>
+                            {d.address.split('\n').slice(1).join(' ')}
+                          </div>
+                        )}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-700">
                         <div className="font-extrabold uppercase text-slate-800">{d.vehicle_no}</div>
@@ -457,6 +522,13 @@ export const DispatchPipeline: React.FC<DispatchPipelineProps> = ({
                           const maxP = getVehicleMaxPallets(vSize);
                           const curP = d.total_pallets || 1;
                           const utilPct = Math.round((curP / maxP) * 100);
+                          if (d.is_empty_pallets) {
+                            return (
+                              <div className="text-[10px] font-semibold text-slate-400 font-mono flex items-center gap-1.5 mt-0.5">
+                                <span className="bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-bold">{vSize}</span>
+                              </div>
+                            );
+                          }
                           return (
                             <div className="text-[10px] font-semibold text-slate-400 font-mono flex items-center gap-1.5 mt-0.5">
                               <span className="bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-bold">{vSize}</span>
@@ -470,22 +542,26 @@ export const DispatchPipeline: React.FC<DispatchPipelineProps> = ({
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-600 font-medium">
                         {d.supplier_name}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-600 font-medium">
-                        {formatDateTimeDisplay(d.date)}
-                      </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-700 font-semibold w-64">
-                        <div className="space-y-1.5 max-w-[200px]">
-                          <div className="flex justify-between text-xs font-mono">
-                            <span>{loaded} / {total}</span>
-                            <span className="font-bold text-slate-500">{progressPct}%</span>
+                        {Boolean(d.is_empty_pallets) ? (
+                          <div className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-amber-50 text-amber-800 border border-amber-200 rounded-lg text-xs font-bold font-mono">
+                            <Package size={13} className="text-amber-700" />
+                            <span>Empty Return ({d.total_pallets || 1} Pallets)</span>
                           </div>
-                          <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden border border-slate-200">
-                            <div
-                              className="bg-[#4BB8FA] h-full rounded-full transition-all duration-300"
-                              style={{ width: `${progressPct}%` }}
-                            />
+                        ) : (
+                          <div className="space-y-1.5 max-w-[200px]">
+                            <div className="flex justify-between text-xs font-mono">
+                              <span>{loaded} / {total}</span>
+                              <span className="font-bold text-slate-500">{progressPct}%</span>
+                            </div>
+                            <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden border border-slate-200">
+                              <div
+                                className="bg-[#4BB8FA] h-full rounded-full transition-all duration-300"
+                                style={{ width: `${progressPct}%` }}
+                              />
+                            </div>
                           </div>
-                        </div>
+                        )}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm">
                         <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold border ${d.status === 'ready'
@@ -496,13 +572,28 @@ export const DispatchPipeline: React.FC<DispatchPipelineProps> = ({
                         </span>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-center text-sm font-medium">
-                        <button
-                          onClick={() => d.id && onEditDispatch(d.id)}
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-slate-200 hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-700 text-slate-600 rounded-lg text-xs font-bold transition-all cursor-pointer"
-                        >
-                          <Eye size={13} />
-                          <span>Open</span>
-                        </button>
+                        <div className="flex items-center justify-center gap-1.5">
+                          <button
+                            onClick={() => d.id && onEditDispatch(d.id)}
+                            className="inline-flex items-center justify-center gap-1.5 w-[74px] py-1.5 border border-slate-200 hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-700 text-slate-600 rounded-lg text-xs font-bold transition-all cursor-pointer"
+                            title="Open / Edit Dispatch"
+                          >
+                            <Eye size={13} />
+                            <span>Open</span>
+                          </button>
+                          <button
+                            onClick={() => {
+                              if (d.id) {
+                                setDeleteTarget({ id: d.id, dc_no: d.dc_no });
+                                setIsDeleteModalOpen(true);
+                              }
+                            }}
+                            className="inline-flex items-center justify-center w-[29px] h-[29px] p-1.5 border border-slate-200 hover:border-rose-300 hover:bg-rose-50 hover:text-rose-600 text-slate-400 rounded-lg text-xs font-bold transition-all cursor-pointer"
+                            title="Delete Dispatch"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );
@@ -600,6 +691,25 @@ export const DispatchPipeline: React.FC<DispatchPipelineProps> = ({
               />
             </div>
 
+            <div className="space-y-1 flex flex-col justify-end">
+              <label className="text-xs font-bold text-slate-500 uppercase">Return Pallets</label>
+              <label className={`flex items-center gap-2.5 px-3 py-2 border rounded-lg text-sm font-bold cursor-pointer transition-colors h-[38px] select-none ${newDispatch.is_empty_pallets
+                  ? 'bg-amber-50 border-amber-300 text-amber-900 shadow-2xs'
+                  : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100/80'
+                }`}>
+                <input
+                  type="checkbox"
+                  name="is_empty_pallets"
+                  checked={Boolean(newDispatch.is_empty_pallets)}
+                  onChange={handleNewDispatchChange}
+                  className="w-4 h-4 rounded border-slate-300 text-amber-600 focus:ring-amber-500 cursor-pointer"
+                />
+                <span className="text-xs uppercase font-extrabold tracking-wide">
+                  Empty Pallets
+                </span>
+              </label>
+            </div>
+
             <div className="space-y-1 col-span-2">
               <label className="text-xs font-bold text-slate-500 uppercase">Consignee Address</label>
               <select
@@ -687,6 +797,61 @@ export const DispatchPipeline: React.FC<DispatchPipelineProps> = ({
             />
           </div>
         </form>
+      </Modal>
+
+      {/* Delete Confirmation Modal */}
+      <Modal
+        isOpen={isDeleteModalOpen}
+        onClose={() => {
+          if (!isDeleting) {
+            setIsDeleteModalOpen(false);
+            setDeleteTarget(null);
+          }
+        }}
+        title="Delete Dispatch Confirmation"
+      >
+        <div className="space-y-4 select-none">
+          <div className="p-4 bg-rose-50 border border-rose-100 rounded-xl flex items-start gap-3">
+            <AlertTriangle className="text-rose-600 shrink-0 mt-0.5" size={20} />
+            <div className="space-y-1">
+              <h4 className="text-sm font-bold text-rose-900">Are you sure you want to delete this DC?</h4>
+              <p className="text-xs text-rose-700">
+                This will permanently delete dispatch <strong className="font-mono">{deleteTarget?.dc_no}</strong> and remove any pull lists associated with it from the active pipeline.
+              </p>
+            </div>
+          </div>
+          <div className="flex justify-end gap-3 pt-2">
+            <button
+              type="button"
+              disabled={isDeleting}
+              onClick={() => {
+                setIsDeleteModalOpen(false);
+                setDeleteTarget(null);
+              }}
+              className="px-4 py-2 border border-slate-200 text-slate-600 rounded-lg text-xs font-bold hover:bg-slate-50 transition-colors cursor-pointer"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              disabled={isDeleting}
+              onClick={handleDeleteDispatch}
+              className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-bold transition-colors shadow-sm cursor-pointer flex items-center gap-1.5"
+            >
+              {isDeleting ? (
+                <>
+                  <Hourglass size={13} className="animate-spin" />
+                  <span>Deleting...</span>
+                </>
+              ) : (
+                <>
+                  <Trash2 size={13} />
+                  <span>Delete Dispatch</span>
+                </>
+              )}
+            </button>
+          </div>
+        </div>
       </Modal>
     </div>
   );

@@ -8,7 +8,11 @@ interface HeaderProps {
   onToggleMobileSidebar?: () => void;
 }
 
-export const Header: React.FC<HeaderProps> = ({ title, companyName, onToggleMobileSidebar }) => {
+export const Header: React.FC<HeaderProps> = ({
+  title,
+  companyName,
+  onToggleMobileSidebar,
+}) => {
   const [time, setTime] = useState<string>('');
   const [dbActive, setDbActive] = useState<boolean>(true);
 

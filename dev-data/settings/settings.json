@@ -8,10 +8,9 @@
   "printsFolder": "C:\\Projects\\clientprojects\\invoice-system\\dev-data\\prints",
   "logsFolder": "C:\\Projects\\clientprojects\\invoice-system\\dev-data\\logs",
   "addressesList": [
-    "JABIL CURCUIT INDIA PVT LTD (EHTP UNIT)\nPLOT NO-B-26, Ranjangaon MIDC\nTal- Shirur, Dist- Pune 412209",
-    "Jabil",
-    "xyz and this is the adress that is used to the most",
-    "AS PER LIST"
+    "B-26 \nJABIL CURCUIT INDIA PVT LTD (EHTP UNIT)\nPLOT NO-B-26, Ranjangaon MIDC Tal- Shirur, Dist- Pune 412209",
+    "B-1800 \nJABIL CURCUIT INDIA PVT LTD (EHTP UNIT) Y\nPLOT NO-B-1800, Ranjangaon MIDC Tal- Shirur, Dist- Pune 412209",
+    "B-2100 \nJABIL CURCUIT INDIA PVT LTD (EHTP UNIT) X\nPLOT NO-B-2100, Ranjangaon MIDC Tal- Shirur, Dist- Pune 412209"
   ],
   "suppliersList": [
     "MAHADEV",
@@ -38,12 +37,13 @@
     "20 ft",
     "10 ft"
   ],
-  "defaultAddress": "Jabil",
+  "defaultAddress": "B-26 \nJABIL CURCUIT INDIA PVT LTD (EHTP UNIT)\nPLOT NO-B-26, Ranjangaon MIDC Tal- Shirur, Dist- Pune 412209",
   "defaultSupplier": "MAHADEV",
   "defaultScanner": "PRASAD",
   "defaultVerifier": "AMOL",
   "defaultVehicleNo": "MH-12-QW-1234",
   "defaultVehicleSize": "32 ft",
   "warehouseLocation": "F Warehouse",
-  "lastCloudBackupTime": 1787835815142
+  "lastCloudBackupTime": 1788375195982,
+  "lastHourlyCloudBackupTime": 1788550838393
 }

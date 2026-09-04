@@ -20,6 +20,7 @@ export interface AppSettings {
   defaultVehicleSize?: string;
   warehouseLocation?: string;
   lastCloudBackupTime?: number;
+  lastHourlyCloudBackupTime?: number;
 }
 
 export interface Dispatch {
@@ -39,6 +40,7 @@ export interface Dispatch {
   created_by: string;
   created_at?: string;
   status?: 'loading' | 'ready' | 'completed';
+  is_empty_pallets?: boolean | number;
   items?: DispatchItem[];
 }
 
@@ -64,10 +66,10 @@ export interface DispatchItem {
   id?: number;
   dispatch_id?: number;
   pull_list_no: string;
-  id_number: string;
-  kit_type: string;
-  workcell: string;
-  parts: number;
+  id_number?: string;
+  kit_type?: string;
+  workcell?: string;
+  parts?: number;
 }
 
 export interface PullListMaster {
@@ -91,6 +93,7 @@ export interface DashboardStats {
   totalDispatches: number;
   totalPullLists: number;
   recentDispatches: Dispatch[];
+  allDispatches?: Dispatch[];
   trendData: { date: string; count: number }[];
   supervisorShare: { name: string; count: number }[];
 }

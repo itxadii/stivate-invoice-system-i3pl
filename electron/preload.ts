@@ -22,11 +22,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
   backup: {
     triggerBackup: () => ipcRenderer.invoke('backup:trigger'),
     uploadCloud: () => ipcRenderer.invoke('backup:uploadCloud'),
+    uploadLiveStateCloud: () => ipcRenderer.invoke('backup:uploadLiveStateCloud'),
+    restoreBackup: (filePath?: string) => ipcRenderer.invoke('backup:restore', filePath),
+    restoreCloudLatest: () => ipcRenderer.invoke('backup:restoreCloudLatest'),
+    getBackupList: () => ipcRenderer.invoke('backup:list'),
   },
   print: {
     printChallan: (dispatch: any, items: any[]) => ipcRenderer.invoke('print:challan', dispatch, items),
-    printBarcodes: (items: any[]) => ipcRenderer.invoke('print:barcodes', items),
+    printBarcodes: (items: any[], dispatch?: any) => ipcRenderer.invoke('print:barcodes', items, dispatch),
     printCombinedDispatch: (dispatch: any, items: any[]) => ipcRenderer.invoke('print:combined', dispatch, items),
+  },
+  clipboard: {
+    write: (data: { text: string; html?: string }) => ipcRenderer.invoke('clipboard:write', data),
   },
   updater: {
     check: () => ipcRenderer.invoke('updater:check'),

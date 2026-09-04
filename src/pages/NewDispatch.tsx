@@ -2,7 +2,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { databaseService, printService, settingsService } from '../services/ipc';
 import type { Dispatch, DispatchItem, AppSettings } from '../types';
 import { DispatchTable } from '../components/DispatchTable';
-import { ArrowLeft, AlertCircle, Play, CheckCircle, Barcode, FileText, Printer, Sliders } from 'lucide-react';
+import { ArrowLeft, AlertCircle, Play, CheckCircle, Barcode, FileText, Printer, Sliders, Package, ClipboardList, Check, Copy } from 'lucide-react';
+import { copyDispatchPullListsToClipboard } from '../utils/clipboard';
 import { Modal } from '../components/Modal';
 import { DispatchCompleteAnimation, AnimatedStatusButton } from '../components/animations';
 import type { ButtonStatus } from '../components/animations';
@@ -59,7 +60,7 @@ export const NewDispatch: React.FC<NewDispatchProps> = ({
     date: getNowDateTimeString(),
     vehicle_no: '',
     supplier_name: '',
-    address: 'AS PER LIST',
+    address: '',
     total_pallets: 1,
     total_parts: 0,
     particular: 'AS PER LIST',
@@ -68,6 +69,7 @@ export const NewDispatch: React.FC<NewDispatchProps> = ({
     transaction_type: '',
     created_by: 'Operator',
     status: 'loading',
+    is_empty_pallets: false,
   });
 
   const [settings, setSettings] = useState<AppSettings | null>(null);
@@ -78,19 +80,24 @@ export const NewDispatch: React.FC<NewDispatchProps> = ({
   const [confirmCompleteOpen, setConfirmCompleteOpen] = useState(false);
   const [showCompletionAnim, setShowCompletionAnim] = useState(false);
   const [markReadyStatus, setMarkReadyStatus] = useState<ButtonStatus>('idle');
-  const [itemVerifyStatus, setItemVerifyStatus] = useState<Record<number, ButtonStatus>>({});
 
   // Manual Entry Modal for unknown pull lists
   const [manualModalOpen, setManualModalOpen] = useState(false);
   const [showLogistics, setShowLogistics] = useState(false);
   const [isManualPending, setIsManualPending] = useState(false);
   const [manualError, setManualError] = useState<string | null>(null);
-  const [manualItem, setManualItem] = useState<Partial<DispatchItem>>({
+  const [manualItem, setManualItem] = useState<{
+    pull_list_no: string;
+    id_number: string;
+    kit_type: string;
+    workcell: string;
+    parts: number | string;
+  }>({
     pull_list_no: '',
     id_number: '',
     kit_type: '',
     workcell: '',
-    parts: 0
+    parts: ''
   });
 
   const scanInputRef = useRef<HTMLInputElement>(null);
@@ -109,7 +116,7 @@ export const NewDispatch: React.FC<NewDispatchProps> = ({
         return;
       }
       if (d.vehicle_no && d.supplier_name) {
-        const dispatchToSave = { ...d, total_pallets: d.total_pallets || 1 };
+        const dispatchToSave = { ...d, total_pallets: d.total_pallets || 1, is_empty_pallets: d.is_empty_pallets ? 1 : 0 };
         void databaseService.saveDispatch(dispatchToSave, its);
       }
     };
@@ -141,14 +148,18 @@ export const NewDispatch: React.FC<NewDispatchProps> = ({
               verify_by: data.verify_by || '',
               transaction_type: data.transaction_type || '',
               status: (data.status as any) === 'draft' || !data.status ? 'loading' : data.status,
+              is_empty_pallets: Boolean(data.is_empty_pallets),
             });
             setItems(data.items || []);
           }
         } else {
           // Pre-fill with default values from app settings
+          const defaultAddr = (loadedSettings.defaultAddress && loadedSettings.defaultAddress.toUpperCase() !== 'AS PER LIST')
+            ? loadedSettings.defaultAddress
+            : (loadedSettings.addressesList?.find((a: string) => a && a.toUpperCase() !== 'AS PER LIST') || '');
           setDispatch((prev) => ({
             ...prev,
-            address: loadedSettings.defaultAddress || 'AS PER LIST',
+            address: defaultAddr,
             supplier_name: loadedSettings.defaultSupplier || '',
             scanning_by: loadedSettings.defaultScanner || '',
             verify_by: loadedSettings.defaultVerifier || '',
@@ -241,12 +252,9 @@ export const NewDispatch: React.FC<NewDispatchProps> = ({
       return;
     }
 
-    setSaveStatus({
-      text: `Error: Scanned text format is invalid. Expected format: "[ID] [PULL_LIST] [KIT_TYPE] [WORKCELL] [PARTS]" or a valid single Pull List Number.`,
-      type: 'error'
-    });
+    // 3. Fallback: If it does not match standard 5-part pattern, treat as manual description/item
     setPullListInput('');
-    setTimeout(() => setSaveStatus(null), 5000);
+    await handleMarkIndividualLoaded(cleanText);
   };
 
   const handleMarkIndividualLoaded = async (pullListNo: string) => {
@@ -292,7 +300,7 @@ export const NewDispatch: React.FC<NewDispatchProps> = ({
           id_number: '',
           kit_type: '',
           workcell: '',
-          parts: 1
+          parts: ''
         });
         setManualModalOpen(true);
       }
@@ -303,12 +311,13 @@ export const NewDispatch: React.FC<NewDispatchProps> = ({
 
   const handleManualItemSave = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!manualItem.pull_list_no) {
-      setManualError("Pull List Number is required.");
+    const primaryName = (manualItem.pull_list_no || manualItem.kit_type || manualItem.id_number || '').trim();
+    if (!primaryName) {
+      setManualError("Please enter at least a Pull List Number or Description.");
       return;
     }
 
-    const cleanNo = manualItem.pull_list_no.trim().toUpperCase();
+    const cleanNo = (manualItem.pull_list_no ? manualItem.pull_list_no.trim() : primaryName).toUpperCase();
     const resolvedPullListNo = isManualPending ? `${cleanNo}_pending` : cleanNo;
 
     const newItem: DispatchItem = {
@@ -316,10 +325,19 @@ export const NewDispatch: React.FC<NewDispatchProps> = ({
       id_number: (manualItem.id_number || '').trim(),
       kit_type: (manualItem.kit_type || '').trim(),
       workcell: (manualItem.workcell || '').trim(),
-      parts: Number(manualItem.parts) || 0
+      parts: Number(manualItem.parts) > 0 ? Number(manualItem.parts) : 0
     };
 
     setItems((prev) => [newItem, ...prev]);
+
+    // If dispatch particular is still the default 'AS PER LIST', update it with the description
+    setDispatch((prev) => {
+      if (!prev.particular || prev.particular === 'AS PER LIST') {
+        return { ...prev, particular: cleanNo };
+      }
+      return prev;
+    });
+
     setManualModalOpen(false);
     setManualError(null);
     setPullListInput('');
@@ -341,7 +359,7 @@ export const NewDispatch: React.FC<NewDispatchProps> = ({
       id_number: '',
       kit_type: '',
       workcell: '',
-      parts: 1
+      parts: ''
     });
     setIsManualPending(true);
     setManualError(null);
@@ -353,32 +371,83 @@ export const NewDispatch: React.FC<NewDispatchProps> = ({
   };
 
   const handleConfirmLoad = (idx: number) => {
-    setItemVerifyStatus((prev) => ({ ...prev, [idx]: 'loading' }));
-    setTimeout(() => {
-      setItems((prev) => {
-        const next = [...prev];
-        const targetItem = next[idx];
-        if (targetItem && targetItem.pull_list_no.endsWith('_pending')) {
-          next[idx] = {
-            ...targetItem,
-            pull_list_no: targetItem.pull_list_no.replace(/_pending$/, '')
-          };
-        }
-        return next;
+    setItems((prev) => {
+      const next = [...prev];
+      const targetItem = next[idx];
+      if (targetItem && targetItem.pull_list_no.endsWith('_pending')) {
+        next[idx] = {
+          ...targetItem,
+          pull_list_no: targetItem.pull_list_no.replace(/_pending$/, '')
+        };
+      }
+      return next;
+    });
+  };
+
+  const handleToggleVerify = (idx: number) => {
+    setItems((prev) => {
+      const next = [...prev];
+      const targetItem = next[idx];
+      if (!targetItem) return next;
+      const isCurrentlyPending = targetItem.pull_list_no.endsWith('_pending');
+      next[idx] = {
+        ...targetItem,
+        pull_list_no: isCurrentlyPending
+          ? targetItem.pull_list_no.replace(/_pending$/, '')
+          : `${targetItem.pull_list_no}_pending`
+      };
+      return next;
+    });
+  };
+
+  const handleVerifyAll = () => {
+    setItems((prev) =>
+      prev.map((item) => ({
+        ...item,
+        pull_list_no: item.pull_list_no.replace(/_pending$/, '')
+      }))
+    );
+    setSaveStatus({ text: 'All pull lists marked as verified.', type: 'success' });
+    setTimeout(() => setSaveStatus(null), 3000);
+  };
+
+  const [copiedMail, setCopiedMail] = useState(false);
+
+  const handleCopyPullLists = async () => {
+    if (items.length === 0) {
+      setSaveStatus({ text: 'No pull lists to copy.', type: 'error' });
+      setTimeout(() => setSaveStatus(null), 3000);
+      return;
+    }
+    const success = await copyDispatchPullListsToClipboard(dispatch, items);
+    if (success) {
+      setCopiedMail(true);
+      setTimeout(() => setCopiedMail(false), 2500);
+      setSaveStatus({
+        text: `Copied ${items.length} pull lists for DC ${dispatch.dc_no || 'Draft'} to clipboard in email format!`,
+        type: 'success'
       });
-      setItemVerifyStatus((prev) => ({ ...prev, [idx]: 'success' }));
-      setTimeout(() => {
-        setItemVerifyStatus((prev) => ({ ...prev, [idx]: 'idle' }));
-      }, 1000);
-    }, 350);
+      setTimeout(() => setSaveStatus(null), 3500);
+    } else {
+      setSaveStatus({ text: 'Failed to copy to clipboard.', type: 'error' });
+      setTimeout(() => setSaveStatus(null), 3000);
+    }
   };
 
   const handleDispatchChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
-    const { name, value } = e.target;
-    setDispatch((prev) => ({
-      ...prev,
-      [name]: name === 'total_pallets' ? Number(value) : value
-    }));
+    const { name, value, type } = e.target as HTMLInputElement;
+    if (type === 'checkbox') {
+      const checked = (e.target as HTMLInputElement).checked;
+      setDispatch((prev) => ({
+        ...prev,
+        [name]: checked,
+      }));
+    } else {
+      setDispatch((prev) => ({
+        ...prev,
+        [name]: name === 'total_pallets' ? Number(value) : value
+      }));
+    }
   };
 
   const handleSave = async () => {
@@ -387,11 +456,10 @@ export const NewDispatch: React.FC<NewDispatchProps> = ({
       return null;
     }
 
-
     setLoading(true);
     setSaveStatus(null);
     try {
-      const dispatchToSave = { ...dispatch, total_pallets: dispatch.total_pallets || 1 };
+      const dispatchToSave = { ...dispatch, total_pallets: dispatch.total_pallets || 1, is_empty_pallets: dispatch.is_empty_pallets ? 1 : 0 };
       const res = await databaseService.saveDispatch(dispatchToSave, items);
       if (res && res.id) {
         setDispatch((prev) => ({ ...prev, id: res.id, dc_no: res.dc_no }));
@@ -433,6 +501,21 @@ export const NewDispatch: React.FC<NewDispatchProps> = ({
     };
 
     if (!dispatchToPrint.dc_no) return;
+
+    if (dispatch.is_empty_pallets) {
+      try {
+        setLoading(true);
+        await printService.printChallan(dispatchToPrint as Dispatch, items);
+        setSaveStatus({ text: 'Empty Pallet Challan print command sent successfully.', type: 'success' });
+      } catch (err) {
+        console.error(err);
+        setSaveStatus({ text: 'Printing Challan failed.', type: 'error' });
+      } finally {
+        setLoading(false);
+      }
+      return;
+    }
+
     if (items.length === 0) {
       setSaveStatus({ text: 'Add items first before printing the combined challan and barcode set.', type: 'error' });
       return;
@@ -441,7 +524,13 @@ export const NewDispatch: React.FC<NewDispatchProps> = ({
     try {
       setLoading(true);
       await printService.printCombinedDispatch(dispatchToPrint as Dispatch, items);
-      setSaveStatus({ text: 'Combined challan + barcode print set sent for 6 copies.', type: 'success' });
+      const barcodePages = Math.max(1, Math.ceil(items.length / 15));
+      const totalBarcodes = barcodePages * 3;
+      const totalPages = 3 + totalBarcodes;
+      setSaveStatus({
+        text: `Combined print set sent: 3 Challans + ${totalBarcodes} Barcodes (${totalPages} pages in total).`,
+        type: 'success',
+      });
     } catch (err) {
       console.error(err);
       setSaveStatus({ text: 'Printing combined challan and barcodes failed.', type: 'error' });
@@ -451,13 +540,18 @@ export const NewDispatch: React.FC<NewDispatchProps> = ({
   };
 
   const handlePrintBarcodes = async () => {
-    if (items.length === 0) {
-      setSaveStatus({ text: 'No items to print barcodes.', type: 'error' });
+    if (dispatch.is_empty_pallets || items.length === 0) {
+      setSaveStatus({ text: 'No barcode items to print for Empty Pallets Return.', type: 'error' });
       return;
     }
     try {
       setLoading(true);
-      await printService.printBarcodes(items);
+      const savedDispatch = dispatch.dc_no ? dispatch : await handleSave();
+      const dispatchToPrint = {
+        ...dispatch,
+        dc_no: savedDispatch?.dc_no || dispatch.dc_no,
+      };
+      await printService.printBarcodes(items, dispatchToPrint as Dispatch);
       setSaveStatus({ text: 'Barcode print command sent successfully.', type: 'success' });
     } catch (err) {
       setSaveStatus({ text: 'Failed to print barcodes.', type: 'error' });
@@ -467,13 +561,18 @@ export const NewDispatch: React.FC<NewDispatchProps> = ({
   };
 
   const handlePrintChallan = async () => {
-    if (!dispatch.dc_no) {
-      setSaveStatus({ text: 'Please save the dispatch first before printing the challan.', type: 'error' });
-      return;
-    }
     try {
       setLoading(true);
-      await printService.printChallan(dispatch as Dispatch, items);
+      const savedDispatch = dispatch.dc_no ? dispatch : await handleSave();
+      const dispatchToPrint = {
+        ...dispatch,
+        dc_no: savedDispatch?.dc_no || dispatch.dc_no,
+      };
+      if (!dispatchToPrint.dc_no) {
+        setSaveStatus({ text: 'Failed to generate DC number for challan.', type: 'error' });
+        return;
+      }
+      await printService.printChallan(dispatchToPrint as Dispatch, items);
       setSaveStatus({ text: 'Challan PDF print command sent successfully.', type: 'success' });
     } catch (err) {
       setSaveStatus({ text: 'Failed to print Challan PDF.', type: 'error' });
@@ -493,7 +592,7 @@ export const NewDispatch: React.FC<NewDispatchProps> = ({
     setLoading(true);
     setSaveStatus(null);
     try {
-      const updatedDispatch = { ...dispatch, status: 'ready' as const };
+      const updatedDispatch = { ...dispatch, status: 'ready' as const, is_empty_pallets: dispatch.is_empty_pallets ? 1 : 0 };
       const res = await databaseService.saveDispatch(updatedDispatch, items);
       if (res && res.id) {
         setDispatch((prev) => ({ ...prev, status: 'ready' }));
@@ -522,22 +621,24 @@ export const NewDispatch: React.FC<NewDispatchProps> = ({
     const loadedCount = items.filter(item => !item.pull_list_no.endsWith('_pending')).length;
     const hasPending = items.some(item => item.pull_list_no.endsWith('_pending'));
 
-    if (totalPullLists === 0) {
-      setSaveStatus({
-        text: 'Cannot complete dispatch: No pull lists have been added to this dispatch.',
-        type: 'error'
-      });
-      setConfirmCompleteOpen(false);
-      return;
-    }
+    if (!dispatch.is_empty_pallets) {
+      if (totalPullLists === 0) {
+        setSaveStatus({
+          text: 'Cannot complete dispatch: No pull lists have been added to this dispatch.',
+          type: 'error'
+        });
+        setConfirmCompleteOpen(false);
+        return;
+      }
 
-    if (hasPending || loadedCount < totalPullLists) {
-      setSaveStatus({
-        text: `Cannot complete dispatch: Not all pull lists are verified (${loadedCount} of ${totalPullLists} verified). Please scan or verify all pending pull lists first.`,
-        type: 'error'
-      });
-      setConfirmCompleteOpen(false);
-      return;
+      if (hasPending || loadedCount < totalPullLists) {
+        setSaveStatus({
+          text: `Cannot complete dispatch: Not all pull lists are verified (${loadedCount} of ${totalPullLists} verified). Please scan or verify all pending pull lists first.`,
+          type: 'error'
+        });
+        setConfirmCompleteOpen(false);
+        return;
+      }
     }
 
     setLoading(true);
@@ -548,7 +649,8 @@ export const NewDispatch: React.FC<NewDispatchProps> = ({
       const updatedDispatch = { 
         ...dispatch, 
         status: 'completed' as const,
-        date: completionTimestamp
+        date: completionTimestamp,
+        is_empty_pallets: dispatch.is_empty_pallets ? 1 : 0
       };
       const res = await databaseService.saveDispatch(updatedDispatch, items);
       if (res && res.id) {
@@ -626,10 +728,18 @@ export const NewDispatch: React.FC<NewDispatchProps> = ({
             onClick={handlePrintCombinedDispatch}
             disabled={loading || items.length === 0}
             className="flex items-center gap-1.5 px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold cursor-pointer transition-colors disabled:opacity-50"
-            title="Prints 3 copies of Challan and 3 copies of Barcodes (Total 6 pages) in 1 click"
+            title={
+              items.length > 15
+                ? `Prints 3 Challans and ${Math.ceil(items.length / 15) * 3} Barcodes (${3 + Math.ceil(items.length / 15) * 3} pages in total) in 1 click`
+                : "Prints 3 copies of Challan and 3 copies of Barcodes (Total 6 pages) in 1 click"
+            }
           >
             <Printer size={14} />
-            <span>Print Set (3x Challan + 3x Barcodes)</span>
+            <span>
+              {items.length > 15
+                ? `Print Set (3x Challan + ${Math.ceil(items.length / 15) * 3}x Barcodes)`
+                : 'Print Set (3x Challan + 3x Barcodes)'}
+            </span>
           </button>
 
           {/* Print Barcodes Button */}
@@ -708,11 +818,11 @@ export const NewDispatch: React.FC<NewDispatchProps> = ({
           </button>
         </div>
 
-        {/* Dynamic Grid Layout */}
-        <div className={`flex-1 grid grid-cols-1 gap-6 ${showLogistics ? 'lg:grid-cols-3' : 'lg:grid-cols-2'}`}>
+        {/* Dynamic Horizontal Columns Layout */}
+        <div className="flex-1 min-w-0 flex flex-col lg:flex-row gap-5 items-start">
           {/* Left Side: Dispatch Metadata */}
           {showLogistics && (
-            <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-4">
+            <div className="w-full lg:w-72 xl:w-80 shrink-0 bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-4">
               <h4 className="text-xs font-extrabold text-slate-400 uppercase tracking-wider">Dispatch Logistics</h4>
               
               <div className="space-y-4">
@@ -858,7 +968,19 @@ export const NewDispatch: React.FC<NewDispatchProps> = ({
                 </div>
 
                 <div className="space-y-1">
-                  <label className="text-xs font-bold text-slate-500 uppercase">Total Pallets Count</label>
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-bold text-slate-500 uppercase">Total Pallets Count</label>
+                    <label className="inline-flex items-center gap-1.5 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        name="is_empty_pallets"
+                        checked={Boolean(dispatch.is_empty_pallets)}
+                        onChange={handleDispatchChange}
+                        className="w-3.5 h-3.5 rounded border-slate-300 text-amber-600 focus:ring-amber-500 cursor-pointer"
+                      />
+                      <span className="text-[11px] font-bold text-amber-700 uppercase tracking-wide">Empty Pallets</span>
+                    </label>
+                  </div>
                   <input
                     type="number"
                     name="total_pallets"
@@ -866,170 +988,167 @@ export const NewDispatch: React.FC<NewDispatchProps> = ({
                     onChange={handleDispatchChange}
                     min={1}
                     required
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-slate-50 focus:outline-none focus:border-emerald-500 focus:bg-white transition-colors font-mono font-bold text-slate-700"
+                    className={`w-full px-3 py-2 border rounded-lg text-sm transition-colors font-mono font-bold ${
+                      dispatch.is_empty_pallets
+                        ? 'bg-amber-50/70 border-amber-300 text-amber-900 focus:bg-white focus:border-amber-500'
+                        : 'border-slate-200 bg-slate-50 focus:outline-none focus:border-emerald-500 focus:bg-white text-slate-700'
+                    }`}
                   />
                 </div>
               </div>
             </div>
           )}
 
-          {/* Right Side: Scan barcodes & Table items */}
-          <div className={`${
-            dispatch.id && (dispatch.status === 'loading' || dispatch.status === 'ready')
-              ? 'lg:col-span-1'
-              : 'lg:col-span-2'
-          } bg-white p-6 rounded-xl border border-slate-200 shadow-sm flex flex-col space-y-4`}>
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <h4 className="text-xs font-extrabold text-slate-400 uppercase tracking-wider">Dispatch Items</h4>
-            
-            <div className="flex flex-wrap items-center gap-3">
-              <button
-                type="button"
-                onClick={handleOpenManualModal}
-                className="px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-700 rounded-lg text-xs font-bold border border-amber-200 transition-colors cursor-pointer"
-              >
-                + Add Manually
-              </button>
-
-              {/* Totals Summary */}
-              <div className="flex items-center gap-4 text-xs font-bold text-slate-600 bg-slate-50 px-4 py-2 rounded-lg border border-slate-100">
-                <div>
-                  Lists: <span className="text-emerald-600 font-mono font-extrabold">{items.length}</span>
+          {/* Dispatch Items (Merged with Loading Checklist) */}
+          <div className="flex-1 min-w-0 bg-white p-6 rounded-xl border border-slate-200 shadow-sm flex flex-col space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-2 border-b border-slate-100">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-blue-50 text-blue-600 rounded-xl border border-blue-100 shadow-2xs">
+                  <Package size={18} />
                 </div>
-                <div className="w-px h-3 bg-slate-200" />
                 <div>
-                  Total Parts: <span className="text-emerald-600 font-mono font-extrabold">{dispatch.total_parts}</span>
+                  <h4 className="text-sm font-extrabold text-slate-800 uppercase tracking-wide">Dispatch Items</h4>
+                  <p className="text-xs text-slate-400">Scanned pull lists and items associated with this dispatch</p>
+                </div>
+              </div>
+              
+              <div className="flex flex-wrap items-center gap-3">
+                <button
+                  type="button"
+                  onClick={handleOpenManualModal}
+                  disabled={Boolean(dispatch.is_empty_pallets)}
+                  className="px-3.5 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-700 rounded-lg text-xs font-bold border border-amber-200 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed shadow-2xs"
+                >
+                  + Add Manually
+                </button>
+
+                {/* Totals Summary */}
+                <div className="flex items-center gap-4 text-xs font-bold text-slate-600 bg-slate-50 px-4 py-2 rounded-xl border border-slate-200 shadow-2xs">
+                  <div>
+                    Pull Lists: <span className="text-emerald-600 font-mono font-black text-sm">{items.length}</span>
+                  </div>
+                  <div className="w-px h-3.5 bg-slate-300" />
+                  <div>
+                    Total Parts: <span className="text-emerald-600 font-mono font-black text-sm">{dispatch.total_parts}</span>
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
 
-          {/* Pull List Paste Box */}
-          <form onSubmit={handleScanSubmit} className="flex gap-2 w-full">
-            <input
-              ref={scanInputRef}
-              type="text"
-              placeholder="Paste Pull List Number or Email Subject line and press Enter..."
-              value={pullListInput}
-              onChange={(e) => setPullListInput(e.target.value)}
-              className="flex-1 px-4 py-3 bg-slate-50 text-slate-800 placeholder-slate-400 font-mono border border-slate-200 rounded-lg focus:outline-none focus:border-[#4BB8FA] focus:bg-white transition-all text-sm select-all font-bold tracking-wider focus:ring-2 focus:ring-[#4BB8FA]/20"
-            />
-            <button
-              type="submit"
-              className="px-4 py-3 bg-[#4BB8FA] text-slate-900 rounded-lg text-sm font-bold hover:bg-[#35a0dc] cursor-pointer whitespace-nowrap flex-shrink-0"
-            >
-              Mark Loaded
-            </button>
-          </form>
-
-          <div className="flex-1 overflow-y-auto max-h-90">
-            <DispatchTable items={items} onRemoveItem={handleRemoveItem} />
-          </div>
-        </div>
-
-        {/* Third Column: Loading Checklist (Only shown in active pipeline edit mode) */}
-        {dispatch.id && (dispatch.status === 'loading' || dispatch.status === 'ready') && (
-          <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm flex flex-col space-y-4">
-            <h4 className="text-xs font-extrabold text-slate-400 uppercase tracking-wider">Loading Checklist</h4>
-            
-            <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-2 text-xs border-b border-slate-100 pb-3">
-                <div>
-                  <span className="text-slate-400 font-bold uppercase block">Vehicle</span>
-                  <span className="font-semibold text-slate-700 uppercase">{dispatch.vehicle_no}</span>
-                </div>
-                <div>
-                  <span className="text-slate-400 font-bold uppercase block">Supervisor</span>
-                  <span className="font-semibold text-slate-700">{dispatch.supplier_name}</span>
-                </div>
-                <div className="pt-2 col-span-2">
-                  <span className="text-slate-400 font-bold uppercase block">Created At</span>
-                  <span className="font-semibold text-slate-700">
-                    {dispatch.created_at ? new Date(dispatch.created_at).toLocaleString() : 'Just now'}
-                  </span>
-                </div>
-              </div>
-
-              <div className="space-y-1.5 pt-1">
-                {(() => {
-                  const loadedCount = items.filter(item => !item.pull_list_no.endsWith('_pending')).length;
-                  const totalPullLists = items.length;
-                  const pct = totalPullLists > 0 ? Math.min(100, Math.round((loadedCount / totalPullLists) * 100)) : 0;
-                  return (
-                    <>
-                      <div className="flex justify-between text-xs font-bold font-mono">
-                        <span className="text-slate-500 uppercase tracking-wider text-[10px]">Overall Progress</span>
-                        <span>{loadedCount} / {totalPullLists} Pull Lists ({pct}%)</span>
+            {/* Merged Verification Progress Banner */}
+            {items.length > 0 && !dispatch.is_empty_pallets && (() => {
+              const loadedCount = items.filter(item => !item.pull_list_no.endsWith('_pending')).length;
+              const totalPullLists = items.length;
+              const progressPct = totalPullLists > 0 ? Math.min(100, Math.round((loadedCount / totalPullLists) * 100)) : 0;
+              return (
+                <div className="bg-slate-50/90 rounded-xl p-3.5 border border-slate-200/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-2xs">
+                  <div className="flex items-center gap-3 flex-1 min-w-[200px]">
+                    <div className={`p-2 rounded-lg ${progressPct === 100 ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-100 text-blue-700'}`}>
+                      {progressPct === 100 ? <CheckCircle size={18} /> : <ClipboardList size={18} />}
+                    </div>
+                    <div className="flex-1 space-y-1">
+                      <div className="flex justify-between text-xs font-mono font-bold">
+                        <span className="text-slate-600 uppercase tracking-wider text-[10px] font-sans flex items-center gap-1.5">
+                          Verification Progress
+                        </span>
+                        <span className="text-slate-800">
+                          {loadedCount} of {totalPullLists} Verified ({progressPct}%)
+                        </span>
                       </div>
-                      <div className="w-full bg-slate-100 rounded-full h-2.5 overflow-hidden border border-slate-200">
+                      <div className="w-full bg-slate-200/80 rounded-full h-2 overflow-hidden border border-slate-200/60">
                         <div
-                          className="bg-[#4BB8FA] h-full rounded-full transition-all duration-300"
-                          style={{ width: `${pct}%` }}
+                          className={`h-full rounded-full transition-all duration-300 ${
+                            progressPct === 100 ? 'bg-emerald-500' : 'bg-[#4BB8FA]'
+                          }`}
+                          style={{ width: `${progressPct}%` }}
                         />
                       </div>
-                    </>
-                  );
-                })()}
-              </div>
-
-              {/* Checklist Scroll List */}
-              <div className="space-y-3 pt-2 flex flex-col">
-                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block font-sans">Scanning Checklist</span>
-                
-                <div className="space-y-2.5 overflow-y-auto max-h-[300px] pr-1">
-                  {items.length === 0 ? (
-                    <div className="py-6 px-4 text-center text-xs font-semibold text-slate-400 border border-dashed border-slate-200 rounded-xl bg-slate-50/50">
-                      No pull lists added yet. Scan or add pull lists to build checklist.
                     </div>
-                  ) : (
-                    <>
-                      {/* Checked items */}
-                      {items.filter(item => !item.pull_list_no.endsWith('_pending')).map((item, idx) => (
-                        <div
-                          key={`loaded-${idx}`}
-                          className="flex items-center gap-3 text-sm font-bold text-slate-700 bg-emerald-50/40 backdrop-blur-sm p-2.5 rounded-xl border border-emerald-100/60 shadow-sm transition-all duration-200 h-12"
-                        >
-                          <span className="flex items-center justify-center w-6 h-6 rounded-full bg-emerald-100 text-emerald-800 text-xs font-black shrink-0 shadow-sm">
-                            ✓
-                          </span>
-                          <span className="font-mono text-emerald-900 font-bold tracking-wider truncate text-sm">{item.pull_list_no.replace(/_pending$/, '')}</span>
-                        </div>
-                      ))}
+                  </div>
 
-                      {/* Pending items from the list */}
-                      {items.filter(item => item.pull_list_no.endsWith('_pending')).map((item, idx) => {
-                        const cleanPullList = item.pull_list_no.replace(/_pending$/, '');
-                        const actualIdx = items.indexOf(item);
-                        return (
-                          <div
-                            key={`pending-list-${idx}`}
-                            className="flex items-center gap-3 bg-amber-50/30 backdrop-blur-sm p-2.5 rounded-xl border border-amber-200/40 shadow-sm transition-all duration-200 hover:shadow-md h-12"
-                          >
-                            <span className="flex items-center justify-center w-6 h-6 rounded-full border border-amber-300 text-amber-500 text-xs font-extrabold shrink-0 bg-amber-50 shadow-inner">
-                              ○
-                            </span>
-                            <span className="font-mono text-amber-900 font-bold tracking-wider truncate flex-1 text-sm">{cleanPullList}</span>
-                            <AnimatedStatusButton
-                              type="button"
-                              status={itemVerifyStatus[actualIdx] || 'idle'}
-                              idleText="Verify"
-                              loadingText="Verifying..."
-                              successText="✓ Verified"
-                              variant="success"
-                              onClick={() => handleConfirmLoad(actualIdx)}
-                            />
-                          </div>
-                        );
-                      })}
-                    </>
-                  )}
+                  <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
+                    {items.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={handleCopyPullLists}
+                        className={`p-2 rounded-lg text-xs font-bold transition-all cursor-pointer shadow-2xs flex items-center justify-center border ${
+                          copiedMail
+                            ? 'bg-emerald-50 text-emerald-700 border-emerald-300'
+                            : 'bg-blue-50 hover:bg-blue-100 text-blue-700 border-blue-200'
+                        }`}
+                        title={copiedMail ? "Copied for Mail!" : "Copy for Mail"}
+                        aria-label="Copy for Mail"
+                      >
+                        {copiedMail ? <Check size={16} className="text-emerald-600 stroke-[3]" /> : <Copy size={16} />}
+                      </button>
+                    )}
+                    {loadedCount < totalPullLists && (
+                      <button
+                        type="button"
+                        onClick={handleVerifyAll}
+                        className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition-all cursor-pointer shadow-2xs flex items-center gap-1.5"
+                        title="Mark all pull lists as verified"
+                      >
+                        <Check size={14} className="stroke-[3]" />
+                        <span>Verify All ({totalPullLists - loadedCount})</span>
+                      </button>
+                    )}
+                    {progressPct === 100 && (
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-lg text-xs font-black shadow-2xs">
+                        <Check size={14} className="text-emerald-700 stroke-[3]" />
+                        <span>All Items Verified</span>
+                      </span>
+                    )}
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* Empty Pallets Banner */}
+            {dispatch.is_empty_pallets && (
+              <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl flex items-start gap-3 text-amber-900 shadow-2xs">
+                <div className="p-2 bg-amber-100 text-amber-800 rounded-lg shrink-0 mt-0.5">
+                  <Package size={18} />
+                </div>
+                <div className="space-y-1">
+                  <h5 className="text-xs font-black uppercase tracking-wider text-amber-950">Empty Pallets Return Mode Active</h5>
+                  <p className="text-xs text-amber-800 leading-relaxed font-medium">
+                    This DC is configured for <strong>{dispatch.total_pallets || 1} Empty Pallets</strong>. Pull list scanning is not required. You can print Challans and click <strong>Mark Ready</strong> / <strong>Complete Dispatch</strong> directly.
+                  </p>
                 </div>
               </div>
+            )}
+
+            {/* Pull List Paste Box */}
+            <form onSubmit={handleScanSubmit} className="flex gap-2.5 w-full">
+              <input
+                ref={scanInputRef}
+                type="text"
+                placeholder={dispatch.is_empty_pallets ? "Empty Pallets Return (No pull lists needed)..." : "Paste Pull List Number or Email Subject line and press Enter..."}
+                value={pullListInput}
+                onChange={(e) => setPullListInput(e.target.value)}
+                disabled={Boolean(dispatch.is_empty_pallets)}
+                className="flex-1 px-4 py-3 bg-slate-50/80 text-slate-800 placeholder-slate-400 font-mono border-2 border-slate-200 rounded-xl focus:outline-none focus:border-[#4BB8FA] focus:bg-white transition-all text-sm select-all font-bold tracking-wider focus:ring-2 focus:ring-[#4BB8FA]/20 disabled:opacity-50 disabled:cursor-not-allowed shadow-2xs"
+              />
+              <button
+                type="submit"
+                disabled={Boolean(dispatch.is_empty_pallets)}
+                className="px-6 py-3 bg-[#4BB8FA] text-slate-900 rounded-xl text-sm font-black hover:bg-[#35a0dc] transition-all cursor-pointer whitespace-nowrap flex-shrink-0 disabled:opacity-50 disabled:cursor-not-allowed shadow-2xs"
+              >
+                Mark Loaded
+              </button>
+            </form>
+
+            <div className="flex-1 overflow-y-auto min-h-[380px] max-h-[620px] rounded-xl border border-slate-200 shadow-2xs">
+              <DispatchTable
+                items={items}
+                onRemoveItem={handleRemoveItem}
+                onToggleVerify={handleToggleVerify}
+              />
             </div>
           </div>
-        )}
+        </div>
       </div>
-    </div>
 
       {/* Manual Entry Modal */}
       <Modal
@@ -1064,57 +1183,66 @@ export const NewDispatch: React.FC<NewDispatchProps> = ({
           )}
 
           <div className="space-y-1">
-            <label className="text-xs font-bold text-slate-500 uppercase">Pull List Number</label>
+            <label className="text-xs font-bold text-slate-500 uppercase">
+              Pull List Number / Description <span className="text-rose-500">*</span>
+            </label>
             <input
               type="text"
+              placeholder="e.g. O1RI materials or PL-10294"
               value={manualItem.pull_list_no || ''}
               onChange={(e) => setManualItem((prev) => ({ ...prev, pull_list_no: e.target.value }))}
-              required
               className="w-full px-3 py-2 border border-slate-200 bg-slate-50 focus:bg-white rounded-lg text-sm font-mono text-slate-700 font-bold focus:outline-none focus:border-emerald-500"
             />
           </div>
 
           <div className="space-y-1">
-            <label className="text-xs font-bold text-slate-500 uppercase">ID Number</label>
+            <label className="text-xs font-bold text-slate-500 uppercase">
+              ID Number <span className="text-slate-400 font-normal">(Optional)</span>
+            </label>
             <input
               type="text"
+              placeholder="Optional"
               value={manualItem.id_number || ''}
               onChange={(e) => setManualItem((prev) => ({ ...prev, id_number: e.target.value }))}
-              required
               className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-slate-50 focus:outline-none focus:border-emerald-500 focus:bg-white"
             />
           </div>
 
           <div className="space-y-1">
-            <label className="text-xs font-bold text-slate-500 uppercase">Kit Type</label>
+            <label className="text-xs font-bold text-slate-500 uppercase">
+              Kit Type <span className="text-slate-400 font-normal">(Optional)</span>
+            </label>
             <input
               type="text"
+              placeholder="Optional"
               value={manualItem.kit_type || ''}
               onChange={(e) => setManualItem((prev) => ({ ...prev, kit_type: e.target.value }))}
-              required
               className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-slate-50 focus:outline-none focus:border-emerald-500 focus:bg-white"
             />
           </div>
 
           <div className="space-y-1">
-            <label className="text-xs font-bold text-slate-500 uppercase">Workcell</label>
+            <label className="text-xs font-bold text-slate-500 uppercase">
+              Workcell <span className="text-slate-400 font-normal">(Optional)</span>
+            </label>
             <input
               type="text"
+              placeholder="Optional"
               value={manualItem.workcell || ''}
               onChange={(e) => setManualItem((prev) => ({ ...prev, workcell: e.target.value }))}
-              required
               className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-slate-50 focus:outline-none focus:border-emerald-500 focus:bg-white"
             />
           </div>
 
           <div className="space-y-1">
-            <label className="text-xs font-bold text-slate-500 uppercase">Parts Quantity</label>
+            <label className="text-xs font-bold text-slate-500 uppercase">
+              Parts Quantity <span className="text-slate-400 font-normal">(Optional)</span>
+            </label>
             <input
               type="number"
-              value={manualItem.parts || ''}
-              onChange={(e) => setManualItem((prev) => ({ ...prev, parts: Number(e.target.value) }))}
-              min={1}
-              required
+              placeholder="0"
+              value={manualItem.parts === 0 ? '' : manualItem.parts || ''}
+              onChange={(e) => setManualItem((prev) => ({ ...prev, parts: e.target.value }))}
               className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-slate-50 focus:outline-none focus:border-emerald-500 focus:bg-white font-mono font-bold"
             />
           </div>
@@ -1148,7 +1276,11 @@ export const NewDispatch: React.FC<NewDispatchProps> = ({
             <AlertCircle size={18} className="text-indigo-500 shrink-0 mt-0.5" />
             <div>
               <p className="font-bold mb-1">Confirm Departure</p>
-              <p>Has the truck physically left the warehouse? Confirming will finalize the invoice, transition status to Completed, and archive the dispatch record.</p>
+              <p>
+                {dispatch.is_empty_pallets
+                  ? `Has the truck with ${dispatch.total_pallets || 1} return pallets physically departed? Confirming will finalize the invoice, transition status to Completed, and archive the dispatch record.`
+                  : `Has the truck physically left the warehouse? Confirming will finalize the invoice, transition status to Completed, and archive the dispatch record.`}
+              </p>
             </div>
           </div>
 

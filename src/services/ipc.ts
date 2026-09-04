@@ -23,11 +23,18 @@ declare global {
       backup: {
         triggerBackup(): Promise<{ success: boolean; message: string }>;
         uploadCloud(): Promise<{ success: boolean; message: string }>;
+        uploadLiveStateCloud(): Promise<{ success: boolean; message: string }>;
+        restoreBackup(filePath?: string): Promise<{ success: boolean; message: string }>;
+        restoreCloudLatest(): Promise<{ success: boolean; message: string }>;
+        getBackupList(): Promise<Array<{ name: string; path: string; size: string; date: string }>>;
       };
       print: {
         printChallan(dispatch: Dispatch, items: DispatchItem[]): Promise<{ success: boolean; filePath: string }>;
-        printBarcodes(items: DispatchItem[]): Promise<{ success: boolean; filePath: string }>;
+        printBarcodes(items: DispatchItem[], dispatch?: Dispatch): Promise<{ success: boolean; filePath: string }>;
         printCombinedDispatch(dispatch: Dispatch, items: DispatchItem[]): Promise<{ success: boolean; filePath: string }>;
+      };
+      clipboard?: {
+        write(data: { text: string; html?: string }): Promise<boolean>;
       };
       updater: {
         check(): Promise<void>;
@@ -108,6 +115,22 @@ export const backupService = {
   uploadCloud: async (): Promise<{ success: boolean; message: string }> => {
     if (!api) throw new Error('Electron API not available');
     return api.backup.uploadCloud();
+  },
+  uploadLiveStateCloud: async (): Promise<{ success: boolean; message: string }> => {
+    if (!api) throw new Error('Electron API not available');
+    return api.backup.uploadLiveStateCloud();
+  },
+  restoreBackup: async (filePath?: string): Promise<{ success: boolean; message: string }> => {
+    if (!api) throw new Error('Electron API not available');
+    return api.backup.restoreBackup(filePath);
+  },
+  restoreCloudLatest: async (): Promise<{ success: boolean; message: string }> => {
+    if (!api) throw new Error('Electron API not available');
+    return api.backup.restoreCloudLatest();
+  },
+  getBackupList: async (): Promise<Array<{ name: string; path: string; size: string; date: string }>> => {
+    if (!api) throw new Error('Electron API not available');
+    return api.backup.getBackupList();
   }
 };
 
@@ -116,9 +139,9 @@ export const printService = {
     if (!api) throw new Error('Electron API not available');
     return api.print.printChallan(dispatch, items);
   },
-  printBarcodes: async (items: DispatchItem[]): Promise<{ success: boolean; filePath: string }> => {
+  printBarcodes: async (items: DispatchItem[], dispatch?: Dispatch): Promise<{ success: boolean; filePath: string }> => {
     if (!api) throw new Error('Electron API not available');
-    return api.print.printBarcodes(items);
+    return api.print.printBarcodes(items, dispatch);
   },
   printCombinedDispatch: async (dispatch: Dispatch, items: DispatchItem[]): Promise<{ success: boolean; filePath: string }> => {
     if (!api) throw new Error('Electron API not available');
@@ -146,5 +169,33 @@ export const updaterService = {
   onStatus: (callback: (value: any) => void): (() => void) => {
     if (!api) throw new Error('Electron API not available');
     return api.updater.onStatus(callback);
+  }
+};
+
+export const clipboardService = {
+  write: async (data: { text: string; html?: string }): Promise<boolean> => {
+    if (api?.clipboard?.write) {
+      try {
+        await api.clipboard.write(data);
+        return true;
+      } catch (err) {
+        console.warn('Native clipboard write failed, falling back to browser clipboard:', err);
+      }
+    }
+    try {
+      if (navigator.clipboard && window.ClipboardItem && data.html) {
+        const textBlob = new Blob([data.text], { type: 'text/plain' });
+        const htmlBlob = new Blob([data.html], { type: 'text/html' });
+        await navigator.clipboard.write([
+          new ClipboardItem({ 'text/plain': textBlob, 'text/html': htmlBlob })
+        ]);
+        return true;
+      }
+      await navigator.clipboard.writeText(data.text);
+      return true;
+    } catch (fallbackErr) {
+      console.error('All clipboard operations failed:', fallbackErr);
+      return false;
+    }
   }
 };

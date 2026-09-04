@@ -4,7 +4,8 @@ import type { Dispatch, DispatchItem, AppSettings } from '../types';
 import { SearchBox } from '../components/SearchBox';
 import { Modal } from '../components/Modal';
 import { DispatchTable } from '../components/DispatchTable';
-import { Printer, Eye, Trash2, Calendar, AlertTriangle, Download } from 'lucide-react';
+import { Printer, Eye, Trash2, Calendar, AlertTriangle, Download, Copy, Check, MapPin } from 'lucide-react';
+import { copyDispatchPullListsToClipboard } from '../utils/clipboard';
 
 interface DispatchHistoryProps {}
 
@@ -48,6 +49,10 @@ export const DispatchHistory: React.FC<DispatchHistoryProps> = () => {
   // Delete Confirmation State
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+
+  // Copy Feedback State
+  const [copiedModal, setCopiedModal] = useState(false);
+  const [copiedRowId, setCopiedRowId] = useState<number | null>(null);
 
   const [message, setMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
 
@@ -183,8 +188,60 @@ export const DispatchHistory: React.FC<DispatchHistoryProps> = () => {
   };
 
   const handleDeleteConfirm = (id: number) => {
+    const targetDisp = dispatches.find((d) => d.id === id);
+    if (targetDisp?.status === 'completed') {
+      setMessage({ text: 'Dispatched & Completed Delivery Challans cannot be deleted.', type: 'error' });
+      setTimeout(() => setMessage(null), 3500);
+      return;
+    }
     setDeleteId(id);
     setDeleteModalOpen(true);
+  };
+
+  const handleCopyModalPullLists = async () => {
+    if (!selectedDispatch || !selectedDispatch.items || selectedDispatch.items.length === 0) {
+      setMessage({ text: 'No pull lists available to copy.', type: 'error' });
+      setTimeout(() => setMessage(null), 3000);
+      return;
+    }
+    const success = await copyDispatchPullListsToClipboard(selectedDispatch, selectedDispatch.items);
+    if (success) {
+      setCopiedModal(true);
+      setTimeout(() => setCopiedModal(false), 2500);
+      setMessage({
+        text: `Copied ${selectedDispatch.items.length} pull lists for DC ${selectedDispatch.dc_no} to clipboard in email format!`,
+        type: 'success'
+      });
+      setTimeout(() => setMessage(null), 3500);
+    } else {
+      setMessage({ text: 'Failed to copy to clipboard.', type: 'error' });
+      setTimeout(() => setMessage(null), 3000);
+    }
+  };
+
+  const handleQuickCopyRow = async (dispatch: Dispatch) => {
+    try {
+      if (!dispatch.id) return;
+      const fullDisp = await databaseService.getDispatch(dispatch.id);
+      const items = fullDisp?.items || [];
+      if (items.length === 0) {
+        setMessage({ text: `No pull lists found for ${dispatch.dc_no}.`, type: 'error' });
+        setTimeout(() => setMessage(null), 3000);
+        return;
+      }
+      const success = await copyDispatchPullListsToClipboard(fullDisp || dispatch, items);
+      if (success) {
+        setCopiedRowId(dispatch.id);
+        setTimeout(() => setCopiedRowId(null), 2500);
+        setMessage({
+          text: `Copied ${items.length} pull lists for DC ${dispatch.dc_no} to clipboard in email format!`,
+          type: 'success'
+        });
+        setTimeout(() => setMessage(null), 3500);
+      }
+    } catch (err) {
+      console.error('Quick copy row failed:', err);
+    }
   };
 
   const handleDelete = async () => {
@@ -198,7 +255,10 @@ export const DispatchHistory: React.FC<DispatchHistoryProps> = () => {
         setDeleteId(null);
         setTimeout(() => setMessage(null), 3000);
       } else {
-        setMessage({ text: 'Failed to delete dispatch.', type: 'error' });
+        setMessage({ text: 'Cannot delete: Dispatched delivery challans are permanently locked for compliance.', type: 'error' });
+        setDeleteModalOpen(false);
+        setDeleteId(null);
+        setTimeout(() => setMessage(null), 4000);
       }
     } catch (err: any) {
       setMessage({ text: `Error: ${err.message || err}`, type: 'error' });
@@ -215,7 +275,7 @@ export const DispatchHistory: React.FC<DispatchHistoryProps> = () => {
 
   const handleReprintBarcodes = async (items: DispatchItem[]) => {
     try {
-      await printService.printBarcodes(items);
+      await printService.printBarcodes(items, selectedDispatch || undefined);
     } catch (err) {
       console.error(err);
     }
@@ -323,6 +383,7 @@ export const DispatchHistory: React.FC<DispatchHistoryProps> = () => {
               <thead className="bg-slate-50">
                 <tr>
                   <th className="px-6 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">DC Number</th>
+                  <th className="px-6 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Destination Address</th>
                   <th className="px-6 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Date & Time</th>
                   <th className="px-6 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Vehicle No</th>
                   <th className="px-6 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Supervisor</th>
@@ -336,6 +397,20 @@ export const DispatchHistory: React.FC<DispatchHistoryProps> = () => {
                   <tr key={d.id} className="hover:bg-slate-50/50 transition-colors duration-100">
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-mono font-bold text-slate-800">
                       {d.dc_no}
+                    </td>
+                    <td className="px-6 py-4 text-sm text-slate-700 max-w-[220px]">
+                      <div
+                        className="font-bold text-slate-800 line-clamp-1 truncate flex items-center gap-1.5"
+                        title={d.address || 'No destination address specified'}
+                      >
+                        <MapPin size={13} className="text-slate-400 shrink-0" />
+                        <span className="truncate">{d.address ? d.address.split('\n')[0] : '-'}</span>
+                      </div>
+                      {d.address && d.address.includes('\n') && (
+                        <div className="text-[10px] text-slate-400 truncate mt-0.5" title={d.address}>
+                          {d.address.split('\n').slice(1).join(' ')}
+                        </div>
+                      )}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-600 font-medium">
                       <div className="flex items-center gap-1.5">
@@ -365,6 +440,18 @@ export const DispatchHistory: React.FC<DispatchHistoryProps> = () => {
                         >
                           <Eye size={15} />
                         </button>
+                        {/* Quick Copy for Mail Action */}
+                        <button
+                          onClick={() => d.id && handleQuickCopyRow(d)}
+                          title="Copy pull lists for email (with DC Number)"
+                          className={`p-1 rounded transition-colors duration-150 cursor-pointer ${
+                            copiedRowId === d.id
+                              ? 'text-emerald-600 bg-emerald-50'
+                              : 'text-blue-600 hover:bg-blue-50 hover:text-blue-800'
+                          }`}
+                        >
+                          {copiedRowId === d.id ? <Check size={15} className="stroke-[3]" /> : <Copy size={15} />}
+                        </button>
                         {/* Print Challan Action */}
                         <button
                           onClick={async () => {
@@ -383,14 +470,16 @@ export const DispatchHistory: React.FC<DispatchHistoryProps> = () => {
                         >
                           <Printer size={15} />
                         </button>
-                        {/* Delete Action */}
-                        <button
-                          onClick={() => d.id && handleDeleteConfirm(d.id)}
-                          title="Delete dispatch"
-                          className="p-1 rounded text-rose-600 hover:bg-rose-50 hover:text-rose-800 transition-colors duration-150 cursor-pointer"
-                        >
-                          <Trash2 size={15} />
-                        </button>
+                        {/* Delete Action - Only allowed for non-completed drafts */}
+                        {d.status !== 'completed' && (
+                          <button
+                            onClick={() => d.id && handleDeleteConfirm(d.id)}
+                            title="Delete dispatch"
+                            className="p-1 rounded text-rose-600 hover:bg-rose-50 hover:text-rose-800 transition-colors duration-150 cursor-pointer"
+                          >
+                            <Trash2 size={15} />
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -478,7 +567,24 @@ export const DispatchHistory: React.FC<DispatchHistoryProps> = () => {
 
             {/* List Table */}
             <div className="space-y-2">
-              <span className="text-xs font-bold text-slate-500 uppercase tracking-wider block">Pull Lists Loaded</span>
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-slate-500 uppercase tracking-wider block">
+                  Pull Lists Loaded ({selectedDispatch.items?.length || 0})
+                </span>
+                <button
+                  type="button"
+                  onClick={handleCopyModalPullLists}
+                  className={`p-1.5 rounded-lg text-xs font-bold transition-all border cursor-pointer shadow-2xs flex items-center justify-center ${
+                    copiedModal
+                      ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-300'
+                      : 'bg-blue-50 hover:bg-blue-100 text-blue-700 border-blue-200'
+                  }`}
+                  title={copiedModal ? "Copied for Mail!" : "Copy for Mail"}
+                  aria-label="Copy for Mail"
+                >
+                  {copiedModal ? <Check size={15} className="text-emerald-600 stroke-[3]" /> : <Copy size={15} />}
+                </button>
+              </div>
               <DispatchTable items={selectedDispatch.items} readOnly={true} />
             </div>
 

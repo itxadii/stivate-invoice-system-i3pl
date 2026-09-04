@@ -21,11 +21,18 @@ interface ElectronAPI {
   backup: {
     triggerBackup: () => Promise<{ success: boolean; message: string }>;
     uploadCloud: () => Promise<{ success: boolean; message: string }>;
+    uploadLiveStateCloud: () => Promise<{ success: boolean; message: string }>;
+    restoreBackup: (filePath?: string) => Promise<{ success: boolean; message: string }>;
+    restoreCloudLatest: () => Promise<{ success: boolean; message: string }>;
+    getBackupList: () => Promise<Array<{ name: string; path: string; size: string; date: string }>>;
   };
   print: {
     printChallan: (dispatch: any, items: any[]) => Promise<void>;
-    printBarcodes: (items: any[]) => Promise<void>;
+    printBarcodes: (items: any[], dispatch?: any) => Promise<void>;
     printCombinedDispatch: (dispatch: any, items: any[]) => Promise<void>;
+  };
+  clipboard?: {
+    write: (data: { text: string; html?: string }) => Promise<boolean>;
   };
   updater: {
     check: () => Promise<void>;

@@ -60,10 +60,26 @@ const drawBarcode = (
   x: number,
   y: number,
   height: number,
-  narrowWidth = 0.5,
-  wideWidth = 1.25
+  narrowWidth = 0.45,
+  wideWidth = 1.1
 ): number => {
-  const code = `*${text.toUpperCase()}*`;
+  const cleanText = (text || '').trim().toUpperCase();
+  if (!cleanText) return 0;
+  const code = `*${cleanText}*`;
+
+  // Scale barcode down if it exceeds the column width
+  const maxBarcodeWidth = 230;
+  const naturalCharWidth = (3 * wideWidth) + (7 * narrowWidth);
+  const totalEstimatedWidth = code.length * naturalCharWidth;
+
+  let actualNarrow = narrowWidth;
+  let actualWide = wideWidth;
+  if (totalEstimatedWidth > maxBarcodeWidth && totalEstimatedWidth > 0) {
+    const scale = maxBarcodeWidth / totalEstimatedWidth;
+    actualNarrow = Math.max(0.18, narrowWidth * scale);
+    actualWide = Math.max(0.4, wideWidth * scale);
+  }
+
   let currentX = x;
 
   for (let i = 0; i < code.length; i++) {
@@ -73,7 +89,7 @@ const drawBarcode = (
     for (let j = 0; j < 9; j++) {
       const isBar = j % 2 === 0;
       const isWide = pattern[j] === '1';
-      const width = isWide ? wideWidth : narrowWidth;
+      const width = isWide ? actualWide : actualNarrow;
 
       if (isBar) {
         page.drawRectangle({
@@ -86,7 +102,7 @@ const drawBarcode = (
       }
       currentX += width;
     }
-    currentX += narrowWidth;
+    currentX += actualNarrow;
   }
   return currentX - x;
 };
@@ -132,15 +148,62 @@ const wrapText = (text: string, maxChars: number): string[] => {
   return lines;
 };
 
-const getConsigneeDisplayName = (addressStr?: string): string => {
-  if (!addressStr || !addressStr.trim()) {
-    return 'AS PER LIST';
+const resolveAddress = (addressStr?: string): string => {
+  if (addressStr && addressStr.trim() && addressStr.trim().toUpperCase() !== 'AS PER LIST') {
+    return addressStr.trim();
   }
-  const firstLine = addressStr.split('\n')[0].trim().toUpperCase();
-  return firstLine || 'AS PER LIST';
+  const settings = loadSettings();
+  if (settings.defaultAddress && settings.defaultAddress.trim().toUpperCase() !== 'AS PER LIST') {
+    return settings.defaultAddress.trim();
+  }
+  if (settings.addressesList && settings.addressesList.length > 0) {
+    const valid = settings.addressesList.find(
+      (a: string) => a && a.trim().toUpperCase() !== 'AS PER LIST'
+    );
+    if (valid) return valid.trim();
+  }
+  return '';
 };
 
-const buildChallanPage = (pdfDoc: PDFDocument, dispatch: any, font: any, fontBold: any, logo: any, settings?: any) => {
+const getConsigneeDisplayName = (addressStr?: string): string => {
+  const actual = resolveAddress(addressStr);
+  if (!actual) return 'CONSIGNEE';
+  const firstLine = actual.split('\n')[0].trim().toUpperCase();
+  return firstLine || 'CONSIGNEE';
+};
+
+const resolveDcNumber = (dispatch?: any, items?: any[]): string => {
+  let dcNo = dispatch?.dc_no;
+  if (dcNo && dcNo.toUpperCase() !== 'DRAFT' && dcNo.toUpperCase() !== '(AUTO-GENERATED)') {
+    return dcNo;
+  }
+  if (items && items.length > 0 && items[0].dispatch_id) {
+    try {
+      const { getDispatch } = require('./database');
+      const dbDisp = getDispatch(items[0].dispatch_id);
+      if (dbDisp && dbDisp.dc_no && dbDisp.dc_no.toUpperCase() !== 'DRAFT') {
+        return dbDisp.dc_no;
+      }
+    } catch (e) {}
+  }
+  if (dispatch?.id) {
+    try {
+      const { getDispatch } = require('./database');
+      const dbDisp = getDispatch(dispatch.id);
+      if (dbDisp && dbDisp.dc_no && dbDisp.dc_no.toUpperCase() !== 'DRAFT') {
+        return dbDisp.dc_no;
+      }
+    } catch (e) {}
+  }
+  try {
+    const { generateDCNumber } = require('./database');
+    return generateDCNumber(dispatch?.date || new Date().toISOString());
+  } catch (e) {
+    return `DC-${Date.now().toString().slice(-6)}`;
+  }
+};
+
+const buildChallanPage = (pdfDoc: PDFDocument, dispatch: any, font: any, fontBold: any, logo: any, settings?: any, items?: any[]) => {
   const page = pdfDoc.addPage([841.89, 595.276]);
   const { width, height } = page.getSize();
   const margin = 40;
@@ -177,8 +240,9 @@ const buildChallanPage = (pdfDoc: PDFDocument, dispatch: any, font: any, fontBol
     color: rgb(0, 0, 0),
   });
 
+  const dcNo = resolveDcNumber(dispatch);
   page.drawText('GSTIN: 27AACCP7114K1ZB', { x: rightX, y: yCursor - 20, size: 11, font: fontBold, color: rgb(0.1, 0.1, 0.1) });
-  page.drawText(`Challan No: EL/${dispatch.dc_no || 'DRAFT'}/2026-27`, { x: rightX, y: yCursor - 38, size: 12, font: fontBold, color: rgb(0.1, 0.1, 0.1) });
+  page.drawText(`Challan No: EL/${dcNo}/2026-27`, { x: rightX, y: yCursor - 38, size: 12, font: fontBold, color: rgb(0.1, 0.1, 0.1) });
 
   let formattedDate = dispatch.date || new Date().toISOString();
   try {
@@ -216,7 +280,8 @@ const buildChallanPage = (pdfDoc: PDFDocument, dispatch: any, font: any, fontBol
   });
 
   page.drawText('Consignee/ Transfer To,', { x: margin + 10, y: yCursor - 15, size: 11, font: fontBold, color: rgb(0.1, 0.1, 0.1) });
-  const addressLines = ((dispatch.address || 'AS PER LIST') as string).split('\n');
+  const actualAddress = resolveAddress(dispatch.address);
+  const addressLines = actualAddress ? actualAddress.split('\n') : [];
   let addrY = yCursor - 27;
   for (const line of addressLines) {
     page.drawText(line, { x: margin + 10, y: addrY, size: 9.5, font, color: rgb(0.2, 0.2, 0.2) });
@@ -262,7 +327,32 @@ const buildChallanPage = (pdfDoc: PDFDocument, dispatch: any, font: any, fontBol
   page.drawLine({ start: { x: rightX - 10, y: yCursor }, end: { x: rightX - 10, y: yCursor - 120 }, thickness: 1, color: rgb(0, 0, 0) });
 
   page.drawText('1', { x: margin + 20, y: yCursor - 60, size: 11, font });
-  page.drawText(dispatch.particular || 'AS PER LIST', { x: margin + 80, y: yCursor - 60, size: 12, font: fontBold });
+
+  // Resolve particular text:
+  let particularText = (dispatch.particular || '').trim();
+  if (!particularText || particularText.toUpperCase() === 'AS PER LIST') {
+    // If there is only 1 item, or if items are manual materials, use item's name/description
+    if (items && items.length === 1 && items[0].pull_list_no) {
+      particularText = items[0].pull_list_no.replace(/_pending$/i, '').trim().toUpperCase();
+    } else {
+      particularText = 'AS PER LIST';
+    }
+  }
+
+  // Draw particular text cleanly with text wrapping if needed
+  const maxParticularChars = 34;
+  const particularLines = wrapText(particularText, maxParticularChars);
+  const startParticularY = yCursor - 60 + ((particularLines.length - 1) * 7);
+  for (let i = 0; i < particularLines.length; i++) {
+    page.drawText(particularLines[i], {
+      x: margin + 80,
+      y: startParticularY - (i * 14),
+      size: 11.5,
+      font: fontBold,
+      color: rgb(0.1, 0.1, 0.1),
+    });
+  }
+
   page.drawText(String(dispatch.total_pallets || 1), { x: margin + 420, y: yCursor - 60, size: 12, font: fontBold });
   yCursor -= 120;
 
@@ -302,7 +392,7 @@ const buildBarcodePages = (pdfDoc: PDFDocument, items: any[], font: any, fontBol
   const margin = 25;
   const printableWidth = 791.89;
 
-  let dcNo = dispatch?.dc_no || 'Draft';
+  const dcNo = resolveDcNumber(dispatch, items);
   let rawDateStr = dispatch?.date || new Date().toISOString();
   let dateStr = rawDateStr;
   try {
@@ -319,24 +409,37 @@ const buildBarcodePages = (pdfDoc: PDFDocument, items: any[], font: any, fontBol
   } catch (e) {}
 
   let palletsCount = dispatch?.total_pallets || 1;
-  let consigneeAddrName = getConsigneeDisplayName(dispatch?.address);
+  let vehicleNo = dispatch?.vehicle_no || '';
+  let addrStr = dispatch?.address;
 
   if (items.length > 0 && items[0].dispatch_id) {
     try {
       const { getDispatch } = require('./database');
       const dbDisp = getDispatch(items[0].dispatch_id);
       if (dbDisp) {
-        if (!dcNo || dcNo === 'Draft') dcNo = dbDisp.dc_no;
         if (!dateStr || dateStr === rawDateStr) dateStr = dbDisp.date;
         palletsCount = dbDisp.total_pallets || palletsCount;
-        if (!dispatch?.address && dbDisp.address) {
-          consigneeAddrName = getConsigneeDisplayName(dbDisp.address);
+        if (!addrStr || addrStr.trim().toUpperCase() === 'AS PER LIST') {
+          addrStr = dbDisp.address;
+        }
+        if (!vehicleNo && dbDisp.vehicle_no) {
+          vehicleNo = dbDisp.vehicle_no;
         }
       }
     } catch (err) {
       console.error('Error fetching dispatch details for barcode headers:', err);
     }
   }
+
+  // Multi-line Address: wrap at 55 chars so 3-line addresses fit cleanly without artificial breaks
+  const fullAddress = resolveAddress(addrStr);
+  const addrLines = (fullAddress as string)
+    .split('\n')
+    .flatMap((line: string) => wrapText(line.trim(), 55))
+    .filter(Boolean);
+
+  // Subheader height scaled to comfortably fit 3 lines of address with 12pt bottom padding
+  const subheaderHeight = Math.max(48, 14 + addrLines.length * 11);
 
   const drawHeaderAndTableHeaders = (p: any, pageIndex: number, totalPages: number): number => {
     let yCursor = 595.276 - margin;
@@ -359,17 +462,7 @@ const buildBarcodePages = (pdfDoc: PDFDocument, items: any[], font: any, fontBol
 
     yCursor -= 30;
 
-    // Multi-line Address wrapping to prevent any "..." truncation!
-    const fullAddress = dispatch?.address || consigneeAddrName;
-    const addrLines = (fullAddress as string)
-      .split('\n')
-      .flatMap((line: string) => wrapText(line.trim(), 30))
-      .filter(Boolean);
-
-    const lineCount = Math.max(1, addrLines.length);
-    // Expand subheader bar dynamically: 26 for 1 line, +11 for each extra line (max 48pt)
-    const subheaderHeight = Math.min(50, 26 + (lineCount - 1) * 11);
-
+    // Subheader Box (Older horizontal format)
     p.drawRectangle({
       x: margin,
       y: yCursor - subheaderHeight,
@@ -379,20 +472,20 @@ const buildBarcodePages = (pdfDoc: PDFDocument, items: any[], font: any, fontBol
       borderWidth: 1,
     });
 
-    // Subheader Box Contents (no overlaps!)
-    p.drawText(`DC NO: ${dcNo}`, { x: margin + 10, y: yCursor - 17, size: 9.5, font: fontBold });
-    p.drawText(`NO OF PALLETS: ${palletsCount}`, { x: margin + 195, y: yCursor - 17, size: 9.5, font: fontBold });
-    p.drawText(`DATE & TIME: ${dateStr}`, { x: margin + 575, y: yCursor - 17, size: 9, font: fontBold });
+    // Older format contents: DC NO, NO OF PALLETS, ADDRESS, DATE & TIME
+    p.drawText(`DC NO: ${dcNo}`, { x: margin + 10, y: yCursor - 14, size: 9.5, font: fontBold });
+    p.drawText(`NO OF PALLETS: ${palletsCount}`, { x: margin + 155, y: yCursor - 14, size: 9.5, font: fontBold });
+    p.drawText(`DATE & TIME: ${dateStr}`, { x: margin + 615, y: yCursor - 14, size: 9, font: fontBold });
 
-    // Multi-line Address text starting at x: margin + 335
-    p.drawText('ADDRESS:', { x: margin + 335, y: yCursor - 17, size: 9.5, font: fontBold });
-    let addrLineY = yCursor - 17;
+    // Multi-line Address text (fits 3 lines perfectly without overlapping)
+    p.drawText('ADDRESS:', { x: margin + 280, y: yCursor - 14, size: 9.5, font: fontBold });
+    let addrLineY = yCursor - 14;
     for (let i = 0; i < addrLines.length; i++) {
       if (i === 0) {
-        p.drawText(addrLines[i], { x: margin + 395, y: addrLineY, size: 8.5, font: fontBold });
+        p.drawText(addrLines[i], { x: margin + 340, y: addrLineY, size: 8, font: fontBold });
       } else {
         addrLineY -= 11;
-        p.drawText(addrLines[i], { x: margin + 335, y: addrLineY, size: 8.5, font: fontBold });
+        p.drawText(addrLines[i], { x: margin + 280, y: addrLineY, size: 8, font: fontBold });
       }
     }
 
@@ -426,8 +519,9 @@ const buildBarcodePages = (pdfDoc: PDFDocument, items: any[], font: any, fontBol
     return yCursor - 18;
   };
 
-  // Capacity: 15 Pull Lists per Page
-  const rowsPerPage = 15;
+  // Dynamically calculate capacity per page so rows never encroach bottom margin:
+  const availableTableHeight = (595.276 - margin) - 30 - subheaderHeight - 18 - 25;
+  const rowsPerPage = Math.min(15, Math.max(10, Math.floor(availableTableHeight / 28)));
   const totalPages = Math.max(1, Math.ceil(items.length / rowsPerPage));
   let currentItemIdx = 0;
 
@@ -464,11 +558,11 @@ const buildBarcodePages = (pdfDoc: PDFDocument, items: any[], font: any, fontBol
       const cleanPullListNo = (item.pull_list_no || '').replace(/_pending$/i, '');
       const vals = [
         String(idx + 1),
-        item.id_number || '',
-        cleanPullListNo,
-        item.kit_type || '',
-        item.workcell || '',
-        String(item.parts || 0),
+        item.id_number || '-',
+        cleanPullListNo || '-',
+        item.kit_type || '-',
+        item.workcell || '-',
+        item.parts && Number(item.parts) > 0 ? String(item.parts) : '-',
       ];
 
       for (let i = 0; i < vals.length; i++) {
@@ -483,7 +577,9 @@ const buildBarcodePages = (pdfDoc: PDFDocument, items: any[], font: any, fontBol
       }
 
       try {
-        drawBarcode(page, cleanPullListNo, xCursor + 30, yCursor - 23, 19, 0.45, 1.1);
+        if (cleanPullListNo) {
+          drawBarcode(page, cleanPullListNo, xCursor + 20, yCursor - 23, 19, 0.45, 1.1);
+        }
       } catch (err) {
         console.error(`Failed to draw barcode for ${cleanPullListNo}:`, err);
       }
@@ -494,7 +590,7 @@ const buildBarcodePages = (pdfDoc: PDFDocument, items: any[], font: any, fontBol
   }
 };
 
-export const printChallan = async (dispatch: any, _items: any[]): Promise<{ success: boolean; filePath: string }> => {
+export const printChallan = async (dispatch: any, _items: any[] = [], copies: number = 1): Promise<{ success: boolean; filePath: string }> => {
   try {
     const settings = loadSettings();
     const pdfDoc = await PDFDocument.create();
@@ -502,27 +598,28 @@ export const printChallan = async (dispatch: any, _items: any[]): Promise<{ succ
     const fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
     const logo = await getLogoImage(pdfDoc);
 
-    buildChallanPage(pdfDoc, dispatch, font, fontBold, logo, settings);
+    buildChallanPage(pdfDoc, dispatch, font, fontBold, logo, settings, _items);
 
     const printsDir = settings.printsFolder;
     if (!fs.existsSync(printsDir)) {
       fs.mkdirSync(printsDir, { recursive: true });
     }
 
-    const safeDc = (dispatch.dc_no || 'DRAFT').replace(/[^a-zA-Z0-9-_]/g, '_');
+    const dcNo = resolveDcNumber(dispatch);
+    const safeDc = dcNo.replace(/[^a-zA-Z0-9-_]/g, '_');
     const destPath = path.join(printsDir, `challan_${safeDc}.pdf`);
     const pdfBytes = await pdfDoc.save();
     fs.writeFileSync(destPath, pdfBytes);
 
-    logAudit('PRINT_CHALLAN', `Generated Challan PDF for DC ${dispatch.dc_no || 'DRAFT'}`);
+    logAudit('PRINT_CHALLAN', `Generated Challan PDF for DC ${dcNo} (${copies} copy/copies)`);
 
     try {
-      const printOptions: any = { copies: 1 };
+      const printOptions: any = { copies };
       if (settings.printer && settings.printer !== 'Default') {
         printOptions.printer = settings.printer;
       }
       await printPdf(destPath, printOptions);
-      console.log('Successfully sent Challan PDF (1 copy) to printer:', settings.printer || 'Default');
+      console.log(`Successfully sent Challan PDF (${copies} copy/copies) to printer:`, settings.printer || 'Default');
     } catch (printErr) {
       console.error('Direct printing failed. Falling back to open file:', printErr);
       await shell.openPath(destPath);
@@ -535,7 +632,7 @@ export const printChallan = async (dispatch: any, _items: any[]): Promise<{ succ
   }
 };
 
-export const printBarcodes = async (items: any[]): Promise<{ success: boolean; filePath: string }> => {
+export const printBarcodes = async (items: any[], dispatch?: any, copies: number = 1): Promise<{ success: boolean; filePath: string }> => {
   try {
     const settings = loadSettings();
     const pdfDoc = await PDFDocument.create();
@@ -543,27 +640,29 @@ export const printBarcodes = async (items: any[]): Promise<{ success: boolean; f
     const fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
     const logo = await getLogoImage(pdfDoc);
 
-    buildBarcodePages(pdfDoc, items, font, fontBold, logo);
+    buildBarcodePages(pdfDoc, items, font, fontBold, logo, dispatch);
 
     const printsDir = settings.printsFolder;
     if (!fs.existsSync(printsDir)) {
       fs.mkdirSync(printsDir, { recursive: true });
     }
 
-    const timestamp = Date.now();
-    const destPath = path.join(printsDir, `barcodes_${timestamp}.pdf`);
+    const dcNo = resolveDcNumber(dispatch, items);
+    const safeDc = dcNo.replace(/[^a-zA-Z0-9-_]/g, '_');
+    const destPath = path.join(printsDir, `barcodes_${safeDc}.pdf`);
     const pdfBytes = await pdfDoc.save();
     fs.writeFileSync(destPath, pdfBytes);
 
-    logAudit('PRINT_BARCODES', `Generated Barcode sheet PDF with ${items.length} items`);
+    const barcodePagesCount = pdfDoc.getPageCount();
+    logAudit('PRINT_BARCODES', `Generated Barcode sheet PDF for DC ${dcNo} with ${items.length} items across ${barcodePagesCount} page(s) (${copies} copy/copies)`);
 
     try {
-      const printOptions: any = { copies: 1 };
+      const printOptions: any = { copies };
       if (settings.barcodePrinter && settings.barcodePrinter !== 'Default') {
         printOptions.printer = settings.barcodePrinter;
       }
       await printPdf(destPath, printOptions);
-      console.log('Successfully sent Barcodes PDF (1 copy) to printer:', settings.barcodePrinter || 'Default');
+      console.log(`Successfully sent Barcodes PDF (${copies} copy/copies, ${barcodePagesCount} page(s)) to printer:`, settings.barcodePrinter || 'Default');
     } catch (printErr) {
       console.error('Direct barcode printing failed. Falling back to open file:', printErr);
       await shell.openPath(destPath);
@@ -584,7 +683,7 @@ export const printCombinedDispatch = async (dispatch: any, items: any[]): Promis
     const fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
     const logo = await getLogoImage(pdfDoc);
 
-    buildChallanPage(pdfDoc, dispatch, font, fontBold, logo, settings);
+    buildChallanPage(pdfDoc, dispatch, font, fontBold, logo, settings, items);
     buildBarcodePages(pdfDoc, items, font, fontBold, logo, dispatch);
 
     const printsDir = settings.printsFolder;
@@ -592,16 +691,39 @@ export const printCombinedDispatch = async (dispatch: any, items: any[]): Promis
       fs.mkdirSync(printsDir, { recursive: true });
     }
 
-    const safeDc = (dispatch.dc_no || 'DRAFT').replace(/[^a-zA-Z0-9-_]/g, '_');
+    const dcNo = resolveDcNumber(dispatch, items);
+    const safeDc = dcNo.replace(/[^a-zA-Z0-9-_]/g, '_');
     const destPath = path.join(printsDir, `dispatch_set_${safeDc}.pdf`);
     const pdfBytes = await pdfDoc.save();
     fs.writeFileSync(destPath, pdfBytes);
 
-    logAudit('PRINT_COMBINED_DISPATCH', `Generated combined challan + barcode print set for DC ${dispatch.dc_no || 'DRAFT'}`);
+    const totalPdfPages = pdfDoc.getPageCount();
+    const barcodePagesCount = Math.max(1, totalPdfPages - 1);
+    const totalPrintedPages = totalPdfPages * 3;
+
+    logAudit(
+      'PRINT_COMBINED_DISPATCH',
+      `Generated combined challan + barcode print set for DC ${dcNo}: 3 Challans + ${barcodePagesCount * 3} Barcode pages (${barcodePagesCount} barcode sheet page(s), total ${totalPrintedPages} physical pages)`
+    );
+
+    // If customer has separate physical printers configured for documents vs barcodes:
+    const hasSeparatePrinters =
+      settings.printer &&
+      settings.barcodePrinter &&
+      settings.printer !== 'Default' &&
+      settings.barcodePrinter !== 'Default' &&
+      settings.printer !== settings.barcodePrinter;
+
+    if (hasSeparatePrinters) {
+      console.log('Detected separate document and barcode printers. Printing 3 Challans to Document Printer and 3 sets of Barcodes to Barcode Printer...');
+      await printChallan(dispatch, items, 3);
+      await printBarcodes(items, dispatch, 3);
+      return { success: true, filePath: destPath };
+    }
 
     try {
       const printOptions: any = {
-        copies: 6,
+        copies: 3,
         side: 'simplex',
       };
       const printerName = settings.printer && settings.printer !== 'Default'
@@ -613,7 +735,7 @@ export const printCombinedDispatch = async (dispatch: any, items: any[]): Promis
         printOptions.printer = printerName;
       }
       await printPdf(destPath, printOptions);
-      console.log('Successfully sent combined dispatch set to printer:', printerName || 'Default');
+      console.log(`Successfully sent combined dispatch set (3 sets, total ${totalPrintedPages} pages) to printer:`, printerName || 'Default');
     } catch (printErr) {
       console.error('Combined dispatch print failed. Falling back to open file:', printErr);
       await shell.openPath(destPath);

@@ -15,11 +15,7 @@ export const getDb = (): any => {
   }
 
   if (dbInstance) {
-    try {
-      dbInstance.close();
-    } catch (e) {
-      console.error('Error closing database:', e);
-    }
+    closeDb();
   }
 
   const dbDir = path.dirname(dbPath);
@@ -30,11 +26,24 @@ export const getDb = (): any => {
   dbInstance = new Database(dbPath);
   dbInstance.pragma('foreign_keys = ON');
   dbInstance.pragma('journal_mode = WAL');
+  dbInstance.pragma('busy_timeout = 5000');
   currentDbPath = dbPath;
 
   initializeSchema(dbInstance);
 
   return dbInstance;
+};
+
+export const closeDb = (): void => {
+  if (dbInstance) {
+    try {
+      dbInstance.close();
+    } catch (e) {
+      console.error('Error closing database:', e);
+    }
+    dbInstance = null;
+    currentDbPath = '';
+  }
 };
 
 const initializeSchema = (db: any) => {
@@ -56,7 +65,8 @@ const initializeSchema = (db: any) => {
       created_by TEXT NOT NULL,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
       status TEXT DEFAULT 'loading',
-      vehicle_size TEXT DEFAULT '32 ft'
+      vehicle_size TEXT DEFAULT '32 ft',
+      is_empty_pallets INTEGER DEFAULT 0
     );
 
     CREATE TABLE IF NOT EXISTS dispatch_items (
@@ -95,6 +105,7 @@ const initializeSchema = (db: any) => {
     CREATE INDEX IF NOT EXISTS idx_dispatch_items_pull_list_no ON dispatch_items (pull_list_no);
     CREATE INDEX IF NOT EXISTS idx_dispatch_items_id_number ON dispatch_items (id_number);
     CREATE INDEX IF NOT EXISTS idx_dispatches_date ON dispatches (date DESC, id DESC);
+    CREATE INDEX IF NOT EXISTS idx_dispatches_status ON dispatches (status);
     CREATE INDEX IF NOT EXISTS idx_dispatches_vehicle_no ON dispatches (vehicle_no);
     CREATE INDEX IF NOT EXISTS idx_dispatches_supplier_name ON dispatches (supplier_name);
   `);
@@ -127,6 +138,15 @@ const initializeSchema = (db: any) => {
   try {
     db.exec(`UPDATE dispatches SET status = 'loading' WHERE status IS NULL OR status = '' OR status = 'draft';`);
   } catch (e) {}
+  try {
+    const pragma = db.prepare("PRAGMA table_info(dispatches)").all() as any[];
+    const hasEmptyPallets = pragma.some((c: any) => c.name === 'is_empty_pallets');
+    if (!hasEmptyPallets) {
+      db.exec("ALTER TABLE dispatches ADD COLUMN is_empty_pallets INTEGER DEFAULT 0");
+    }
+  } catch (e) {
+    console.error('Failed to add is_empty_pallets column migration:', e);
+  }
 
   // Ensure default operator user
   try {
@@ -234,19 +254,32 @@ export const saveDispatch = (dispatch: any, items: any[]) => {
     }
 
     if (dispatchId) {
+      const existing = db.prepare('SELECT status, date FROM dispatches WHERE id = ?').get(dispatchId) as { status?: string; date?: string } | undefined;
+      let dispatchDate = dispatch.date;
+      if (dispatch.status === 'completed' && existing && existing.status !== 'completed') {
+        const now = new Date();
+        const year = now.getFullYear();
+        const month = String(now.getMonth() + 1).padStart(2, '0');
+        const day = String(now.getDate()).padStart(2, '0');
+        const hours = String(now.getHours()).padStart(2, '0');
+        const minutes = String(now.getMinutes()).padStart(2, '0');
+        const seconds = String(now.getSeconds()).padStart(2, '0');
+        dispatchDate = dispatch.date || `${year}-${month}-${day}T${hours}:${minutes}:${seconds}`;
+      }
+
       // Update dispatch
       db.prepare(`
         UPDATE dispatches
         SET date = ?, vehicle_no = ?, supplier_name = ?, address = ?, total_pallets = ?, total_parts = ?, created_by = ?,
-            particular = ?, scanning_by = ?, verify_by = ?, transaction_type = ?, status = ?, vehicle_size = ?
+            particular = ?, scanning_by = ?, verify_by = ?, transaction_type = ?, status = ?, vehicle_size = ?, is_empty_pallets = ?
         WHERE id = ?
       `).run(
-        dispatch.date,
+        dispatchDate,
         dispatch.vehicle_no,
         dispatch.supplier_name,
         dispatch.address || '',
         dispatch.total_pallets || 1,
-        dispatch.total_parts,
+        dispatch.total_parts || 0,
         dispatch.created_by || 'Operator',
         dispatch.particular || 'AS PER LIST',
         dispatch.scanning_by || '',
@@ -254,6 +287,7 @@ export const saveDispatch = (dispatch: any, items: any[]) => {
         dispatch.transaction_type || '',
         dispatch.status || 'loading',
         dispatch.vehicle_size || '32 ft',
+        dispatch.is_empty_pallets ? 1 : 0,
         dispatchId
       );
 
@@ -266,8 +300,8 @@ export const saveDispatch = (dispatch: any, items: any[]) => {
       }
       const result = db.prepare(`
         INSERT INTO dispatches (dc_no, date, vehicle_no, supplier_name, address, total_pallets, total_parts, created_by,
-                               particular, scanning_by, verify_by, transaction_type, status, vehicle_size)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                               particular, scanning_by, verify_by, transaction_type, status, vehicle_size, is_empty_pallets)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         dcNo,
         dispatch.date,
@@ -275,14 +309,15 @@ export const saveDispatch = (dispatch: any, items: any[]) => {
         dispatch.supplier_name,
         dispatch.address || '',
         dispatch.total_pallets || 1,
-        dispatch.total_parts,
+        dispatch.total_parts || 0,
         dispatch.created_by || 'Operator',
         dispatch.particular || 'AS PER LIST',
         dispatch.scanning_by || '',
         dispatch.verify_by || '',
         dispatch.transaction_type || '',
         dispatch.status || 'loading',
-        dispatch.vehicle_size || '32 ft'
+        dispatch.vehicle_size || '32 ft',
+        dispatch.is_empty_pallets ? 1 : 0
       );
       dispatchId = result.lastInsertRowid;
     }
@@ -297,10 +332,10 @@ export const saveDispatch = (dispatch: any, items: any[]) => {
       insertItem.run(
         dispatchId,
         item.pull_list_no,
-        item.id_number,
-        item.kit_type,
-        item.workcell,
-        item.parts
+        item.id_number || '',
+        item.kit_type || '',
+        item.workcell || '',
+        Number(item.parts) || 0
       );
     }
 
@@ -337,10 +372,19 @@ export const saveDispatch = (dispatch: any, items: any[]) => {
 
 export const deleteDispatch = (id: number) => {
   const db = getDb();
-  const dispatch = db.prepare('SELECT dc_no FROM dispatches WHERE id = ?').get(id) as { dc_no: string } | undefined;
+  const dispatch = db.prepare('SELECT dc_no, status FROM dispatches WHERE id = ?').get(id) as { dc_no: string; status?: string } | undefined;
   
   if (dispatch) {
-    db.prepare('DELETE FROM dispatches WHERE id = ?').run(id);
+    if (dispatch.status === 'completed') {
+      console.warn(`[Security] Blocked attempt to delete completed dispatch ${dispatch.dc_no} (ID: ${id})`);
+      logAudit('DELETE_DISPATCH_BLOCKED', `Blocked attempt to delete completed dispatch ${dispatch.dc_no} (ID: ${id})`);
+      return false;
+    }
+    const runDelete = db.transaction(() => {
+      db.prepare('DELETE FROM dispatch_items WHERE dispatch_id = ?').run(id);
+      db.prepare('DELETE FROM dispatches WHERE id = ?').run(id);
+    });
+    runDelete();
     logAudit('DELETE_DISPATCH', `Deleted dispatch ${dispatch.dc_no} (ID: ${id})`);
     return true;
   }
@@ -471,7 +515,8 @@ export const getDashboardStats = () => {
   const totalDispatches = db.prepare('SELECT COUNT(*) as count FROM dispatches').get() as { count: number };
   const totalPullLists = db.prepare('SELECT COUNT(*) as count FROM pull_list_master').get() as { count: number };
   
-  const recentDispatches = db.prepare('SELECT * FROM dispatches ORDER BY date DESC, id DESC LIMIT 5').all();
+  const recentDispatches = db.prepare('SELECT * FROM dispatches ORDER BY date DESC, id DESC LIMIT 10').all();
+  const allDispatches = db.prepare('SELECT * FROM dispatches ORDER BY date DESC, id DESC').all();
 
   // Daily dispatches trend (last 7 days of activity)
   const trendData = db.prepare(`
@@ -496,6 +541,7 @@ export const getDashboardStats = () => {
     totalDispatches: totalDispatches?.count || 0,
     totalPullLists: totalPullLists?.count || 0,
     recentDispatches: recentDispatches || [],
+    allDispatches: allDispatches || [],
     trendData: trendData.reverse() || [],
     supervisorShare: supervisorShare || []
   };
@@ -702,17 +748,18 @@ export const getPipelineStats = () => {
   const readyRow = db.prepare("SELECT COUNT(*) as count FROM dispatches WHERE status = 'ready'").get() as { count: number };
   const completedTodayRow = db.prepare("SELECT COUNT(*) as count FROM dispatches WHERE status = 'completed' AND date LIKE ?").get(`${todayStr}%`) as { count: number };
 
-  const activeDispatches = db.prepare("SELECT id, total_pallets FROM dispatches WHERE status IN ('loading', 'ready')").all() as { id: number; total_pallets: number }[];
+  const activeDispatches = db.prepare("SELECT id, total_pallets, is_empty_pallets FROM dispatches WHERE status IN ('loading', 'ready')").all() as { id: number; total_pallets: number; is_empty_pallets?: number }[];
   let expected = 0;
   let loaded = 0;
   for (const d of activeDispatches) {
+    if (d.is_empty_pallets) continue;
     expected += d.total_pallets;
     const itemCount = db.prepare('SELECT COUNT(*) as count FROM dispatch_items WHERE dispatch_id = ?').get(d.id) as { count: number };
     loaded += itemCount?.count || 0;
   }
   const pendingPullLists = Math.max(0, expected - loaded);
 
-  const totalTodayRow = db.prepare('SELECT SUM(total_pallets) as sum FROM dispatches WHERE date LIKE ?').get(`${todayStr}%`) as { sum: number | null };
+  const totalTodayRow = db.prepare('SELECT SUM(total_pallets) as sum FROM dispatches WHERE date LIKE ? AND (is_empty_pallets IS NULL OR is_empty_pallets = 0)').get(`${todayStr}%`) as { sum: number | null };
   const totalPullListsToday = totalTodayRow?.sum || 0;
 
   return {

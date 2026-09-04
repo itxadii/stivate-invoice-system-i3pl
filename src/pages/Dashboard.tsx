@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { databaseService } from '../services/ipc';
-import type { DashboardStats } from '../types';
+import type { DashboardStats, Dispatch } from '../types';
 import { getVehicleMaxPallets } from '../types';
 import { ArrowRight, Truck, FileText, LayoutGrid, Search, Filter, Eye, X } from 'lucide-react';
 
@@ -32,9 +32,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ setActiveTab, onEditDispat
     totalDispatches: 0,
     totalPullLists: 0,
     recentDispatches: [],
+    allDispatches: [],
     trendData: [],
     supervisorShare: []
   });
+  const [allDispatches, setAllDispatches] = useState<Dispatch[]>([]);
   const [loading, setLoading] = useState(true);
   const [trendData, setTrendData] = useState<{ date: string; count: number }[]>([]);
   const [trendRange, setTrendRange] = useState<'7days' | 'thisMonth' | '6months' | 'years'>('7days');
@@ -44,8 +46,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ setActiveTab, onEditDispat
 
   const fetchStats = async () => {
     try {
-      const data = await databaseService.getDashboardStats();
+      const [data, disps] = await Promise.all([
+        databaseService.getDashboardStats(),
+        databaseService.getAllDispatches()
+      ]);
       setStats(data);
+      setAllDispatches(disps && disps.length > 0 ? disps : (data.allDispatches || data.recentDispatches || []));
     } catch (err) {
       console.error('Failed to load dashboard stats:', err);
     } finally {
@@ -81,14 +87,25 @@ export const Dashboard: React.FC<DashboardProps> = ({ setActiveTab, onEditDispat
     }
   }, [trendRange]);
 
-  let fleetLoadedPallets = 0;
-  let fleetMaxPallets = 0;
-  stats.recentDispatches.forEach((d: any) => {
+  const dispatchesList = allDispatches.length > 0 ? allDispatches : (stats.allDispatches || stats.recentDispatches);
+
+  const fleetTruckMap = new Map<string, { loaded: number; max: number }>();
+  dispatchesList.forEach((d: any) => {
+    const truckNo = (d.vehicle_no || '').trim().toUpperCase();
+    if (!truckNo) return;
     const vSize = d.vehicle_size || '32 ft';
     const maxP = getVehicleMaxPallets(vSize);
-    const curP = d.total_pallets || 1;
-    fleetLoadedPallets += curP;
-    fleetMaxPallets += maxP;
+    const curP = Number(d.total_pallets) || 1;
+    const existing = fleetTruckMap.get(truckNo) || { loaded: 0, max: maxP };
+    existing.loaded += curP;
+    fleetTruckMap.set(truckNo, existing);
+  });
+
+  let fleetLoadedPallets = 0;
+  let fleetMaxPallets = 0;
+  fleetTruckMap.forEach(({ loaded, max }) => {
+    fleetLoadedPallets += loaded;
+    fleetMaxPallets += max;
   });
   const fleetUtilizationPct = fleetMaxPallets > 0 ? Math.round((fleetLoadedPallets / fleetMaxPallets) * 100) : 0;
 
@@ -390,12 +407,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ setActiveTab, onEditDispat
         {/* Search, Filter & Quick Category Bar */}
         {(() => {
           const uniqueTrucks = Array.from(
-            new Set(stats.recentDispatches.map((d: any) => (d.vehicle_no || '').trim().toUpperCase()).filter(Boolean))
+            new Set(dispatchesList.map((d: any) => (d.vehicle_no || '').trim().toUpperCase()).filter(Boolean))
           ).sort();
 
           const activeTruckQuery = selectedTruckNumber !== 'all' ? selectedTruckNumber : truckSearchQuery.trim().toUpperCase();
 
-          const filteredTruckDispatches = stats.recentDispatches.filter((d: any) => {
+          const filteredTruckDispatches = dispatchesList.filter((d: any) => {
             if (!activeTruckQuery) return true;
             return (d.vehicle_no || '').toUpperCase().includes(activeTruckQuery);
           });
@@ -448,14 +465,30 @@ export const Dashboard: React.FC<DashboardProps> = ({ setActiveTab, onEditDispat
               {/* Specific Truck Details Panel (If Search or Filter Active) */}
               {activeTruckQuery ? (
                 (() => {
-                  const targetTruckNo = filteredTruckDispatches[0]?.vehicle_no || activeTruckQuery;
-                  const vSize = filteredTruckDispatches[0]?.vehicle_size || '32 ft';
+                  const allTruckDispatches = filteredTruckDispatches;
+                  const recent5TruckDispatches = allTruckDispatches.slice(0, 5);
+                  const targetTruckNo = allTruckDispatches[0]?.vehicle_no || activeTruckQuery;
+                  const vSize = allTruckDispatches[0]?.vehicle_size || '32 ft';
                   const singleTruckCap = getVehicleMaxPallets(vSize);
-                  const dcCount = filteredTruckDispatches.length;
-                  const totalTruckPallets = filteredTruckDispatches.reduce((acc, d: any) => acc + (d.total_pallets || 1), 0);
-                  const totalMaxCapacityForTruck = singleTruckCap * Math.max(1, dcCount);
-                  const truckUtilPct = totalMaxCapacityForTruck > 0 ? Math.round((totalTruckPallets / totalMaxCapacityForTruck) * 100) : 0;
-                  const isOver = totalTruckPallets > totalMaxCapacityForTruck;
+                  const dcCount = allTruckDispatches.length;
+                  const activeDispatches = allTruckDispatches.filter((d: any) => d.status !== 'completed');
+
+                  // Total loaded pallets across all DCs on this truck
+                  const totalTruckPallets = allTruckDispatches.reduce(
+                    (acc, d: any) => acc + (Number(d.total_pallets) || 1),
+                    0
+                  );
+                  const emptyDispatches = allTruckDispatches.filter((d: any) => Boolean(d.is_empty_pallets));
+                  const emptyPallets = emptyDispatches.reduce(
+                    (acc, d: any) => acc + (Number(d.total_pallets) || 1),
+                    0
+                  );
+                  const cargoPallets = totalTruckPallets - emptyPallets;
+
+                  // The truck's physical capacity (e.g. 16 pallets for 32 ft)
+                  const maxTruckCapacity = singleTruckCap;
+                  const truckUtilPct = maxTruckCapacity > 0 ? Math.round((totalTruckPallets / maxTruckCapacity) * 100) : 0;
+                  const isOver = totalTruckPallets > maxTruckCapacity;
 
                   return (
                     <div className="p-5 bg-slate-50 border border-slate-200 rounded-xl space-y-4 shadow-2xs">
@@ -466,7 +499,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ setActiveTab, onEditDispat
                             <span>Truck: {targetTruckNo}</span>
                           </span>
                           <span className="px-3 py-1.5 bg-white border border-slate-200 text-slate-700 rounded-lg text-xs font-bold">
-                            Vehicle Size: {vSize} ({singleTruckCap} Pallets Capacity)
+                            Vehicle Size: {vSize} ({maxTruckCapacity} Pallets Capacity)
                           </span>
                         </div>
 
@@ -477,7 +510,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ setActiveTab, onEditDispat
                             ? 'bg-amber-50 text-amber-800 border-amber-200'
                             : 'bg-emerald-50 text-emerald-800 border-emerald-200'
                         }`}>
-                          {truckUtilPct}% Capacity Utilized ({totalTruckPallets} / {totalMaxCapacityForTruck} Pallets)
+                          {truckUtilPct}% Capacity Utilized ({totalTruckPallets} / {maxTruckCapacity} Pallets)
                         </span>
                       </div>
 
@@ -485,30 +518,51 @@ export const Dashboard: React.FC<DashboardProps> = ({ setActiveTab, onEditDispat
                       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                         <div className="p-3 bg-white rounded-xl border border-slate-200 space-y-1">
                           <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Assigned Dispatches</span>
-                          <span className="text-lg font-extrabold font-mono text-slate-800">{dcCount} DCs</span>
+                          <div className="flex items-baseline gap-1.5 flex-wrap">
+                            <span className="text-lg font-extrabold font-mono text-slate-800">{dcCount} DCs</span>
+                            {activeDispatches.length > 0 && (
+                              <span className="text-[10px] font-semibold text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200">
+                                {activeDispatches.length} Active
+                              </span>
+                            )}
+                          </div>
                         </div>
                         <div className="p-3 bg-white rounded-xl border border-slate-200 space-y-1">
-                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Loaded Pallets</span>
-                          <span className="text-lg font-extrabold font-mono text-slate-800">{totalTruckPallets} Pallets</span>
+                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Total Loaded Pallets</span>
+                          <div className="flex items-baseline gap-1.5">
+                            <span className="text-lg font-extrabold font-mono text-slate-800">{totalTruckPallets} Pallets</span>
+                            {emptyPallets > 0 && (
+                              <span className="text-[10px] font-semibold text-slate-400">
+                                ({cargoPallets} Cargo + {emptyPallets} Return)
+                              </span>
+                            )}
+                          </div>
                         </div>
                         <div className="p-3 bg-white rounded-xl border border-slate-200 space-y-1">
                           <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Max Truck Capacity</span>
-                          <span className="text-lg font-extrabold font-mono text-slate-800">{singleTruckCap} Pallets</span>
+                          <span className="text-lg font-extrabold font-mono text-slate-800">{maxTruckCapacity} Pallets</span>
                         </div>
                         <div className="p-3 bg-white rounded-xl border border-slate-200 space-y-1">
                           <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Capacity Load %</span>
-                          <span className="text-lg font-extrabold font-mono text-emerald-700">{truckUtilPct}%</span>
+                          <span className={`text-lg font-extrabold font-mono ${isOver ? 'text-rose-600' : 'text-emerald-700'}`}>
+                            {truckUtilPct}%
+                          </span>
                         </div>
                       </div>
 
-                      {/* Dispatches Table under this Truck */}
-                      {filteredTruckDispatches.length > 0 ? (
-                        <div className="overflow-x-auto pt-1">
-                          <table className="min-w-full divide-y divide-slate-200 border border-slate-200 rounded-xl overflow-hidden bg-white">
+                      {/* Dispatches Table under this Truck (Showing recent 5 DCs) */}
+                      {recent5TruckDispatches.length > 0 ? (
+                        <div className="space-y-2 pt-1">
+                          <div className="flex items-center justify-between text-xs font-bold text-slate-500 uppercase px-1">
+                            <span>Recent Dispatches {allTruckDispatches.length > 5 ? `(Showing 5 of ${allTruckDispatches.length})` : `(${allTruckDispatches.length})`}</span>
+                          </div>
+                          <div className="overflow-x-auto">
+                            <table className="min-w-full divide-y divide-slate-200 border border-slate-200 rounded-xl overflow-hidden bg-white">
                             <thead className="bg-slate-100/80">
                               <tr>
                                 <th className="px-4 py-2.5 text-left text-xs font-bold text-slate-500 uppercase font-mono">DC Number</th>
                                 <th className="px-4 py-2.5 text-left text-xs font-bold text-slate-500 uppercase">Date & Time</th>
+                                <th className="px-4 py-2.5 text-left text-xs font-bold text-slate-500 uppercase">Status</th>
                                 <th className="px-4 py-2.5 text-left text-xs font-bold text-slate-500 uppercase">Supervisor</th>
                                 <th className="px-4 py-2.5 text-center text-xs font-bold text-slate-500 uppercase">Loaded Pallets</th>
                                 <th className="px-4 py-2.5 text-center text-xs font-bold text-slate-500 uppercase">DC Load Ratio</th>
@@ -516,21 +570,47 @@ export const Dashboard: React.FC<DashboardProps> = ({ setActiveTab, onEditDispat
                               </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-100">
-                              {filteredTruckDispatches.map((d: any) => {
-                                const pCount = d.total_pallets || 1;
+                              {recent5TruckDispatches.map((d: any) => {
+                                const pCount = Number(d.total_pallets) || 1;
                                 const dcUtilPct = Math.round((pCount / singleTruckCap) * 100);
                                 return (
                                   <tr key={d.id} className="hover:bg-slate-50 transition-colors">
-                                    <td className="px-4 py-3 font-mono font-bold text-slate-800 text-xs">{d.dc_no}</td>
+                                    <td className="px-4 py-3 font-mono font-bold text-slate-800 text-xs">
+                                      <div className="flex items-center gap-1.5">
+                                        <span>{d.dc_no}</span>
+                                        {Boolean(d.is_empty_pallets) && (
+                                          <span className="px-1.5 py-0.5 rounded text-[10px] font-black uppercase tracking-wider bg-amber-100 text-amber-800 border border-amber-300">
+                                            Empty
+                                          </span>
+                                        )}
+                                      </div>
+                                    </td>
                                     <td className="px-4 py-3 text-xs text-slate-600 font-medium">{formatDateTimeDisplay(d.date)}</td>
-                                    <td className="px-4 py-3 text-xs text-slate-700 font-bold uppercase">{d.supplier_name}</td>
-                                    <td className="px-4 py-3 text-xs font-mono font-bold text-center text-slate-800">{pCount} Pallets</td>
-                                    <td className="px-4 py-3 text-center">
-                                      <span className={`px-2.5 py-1 text-xs font-extrabold rounded-md border ${
-                                        dcUtilPct > 100 ? 'bg-rose-50 text-rose-700 border-rose-200' : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                    <td className="px-4 py-3 text-xs">
+                                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                                        d.status === 'completed'
+                                          ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                          : d.status === 'ready'
+                                          ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
+                                          : 'bg-amber-50 text-amber-700 border-amber-200'
                                       }`}>
-                                        {dcUtilPct}% of Truck
+                                        {d.status ? d.status.toUpperCase() : 'LOADING'}
                                       </span>
+                                    </td>
+                                    <td className="px-4 py-3 text-xs text-slate-700 font-bold uppercase">{d.supplier_name}</td>
+                                    <td className="px-4 py-3 text-xs font-mono font-bold text-center text-slate-800">{pCount} Pallet{pCount > 1 ? 's' : ''}</td>
+                                    <td className="px-4 py-3 text-center">
+                                      {d.is_empty_pallets ? (
+                                        <span className="px-2.5 py-1 text-xs font-bold rounded-md bg-amber-50 text-amber-700 border border-amber-200">
+                                          Empty Return ({pCount} Pallet{pCount > 1 ? 's' : ''})
+                                        </span>
+                                      ) : (
+                                        <span className={`px-2.5 py-1 text-xs font-extrabold rounded-md border ${
+                                          dcUtilPct > 100 ? 'bg-rose-50 text-rose-700 border-rose-200' : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                        }`}>
+                                          {dcUtilPct}% of Truck
+                                        </span>
+                                      )}
                                     </td>
                                     <td className="px-4 py-3 text-center">
                                       <button
@@ -547,7 +627,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ setActiveTab, onEditDispat
                             </tbody>
                           </table>
                         </div>
-                      ) : null}
+                      </div>
+                    ) : null}
                     </div>
                   );
                 })()
@@ -555,17 +636,21 @@ export const Dashboard: React.FC<DashboardProps> = ({ setActiveTab, onEditDispat
                 /* Vehicle Size Breakdown Cards (Default view when no truck filter selected) */
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   {(() => {
-                    const sizeGroups: Record<string, { count: number; loaded: number; max: number }> = {};
-                    stats.recentDispatches.forEach((d: any) => {
+                    const sizeGroups: Record<string, { count: number; loaded: number; max: number; trucks: Set<string> }> = {};
+                    dispatchesList.forEach((d: any) => {
                       const sz = d.vehicle_size || '32 ft';
                       const maxP = getVehicleMaxPallets(sz);
-                      const curP = d.total_pallets || 1;
+                      const curP = Number(d.total_pallets) || 1;
+                      const truck = (d.vehicle_no || '').trim().toUpperCase();
                       if (!sizeGroups[sz]) {
-                        sizeGroups[sz] = { count: 0, loaded: 0, max: 0 };
+                        sizeGroups[sz] = { count: 0, loaded: 0, max: 0, trucks: new Set() };
                       }
                       sizeGroups[sz].count += 1;
                       sizeGroups[sz].loaded += curP;
-                      sizeGroups[sz].max += maxP;
+                      if (truck && !sizeGroups[sz].trucks.has(truck)) {
+                        sizeGroups[sz].trucks.add(truck);
+                        sizeGroups[sz].max += maxP;
+                      }
                     });
 
                     const keys = Object.keys(sizeGroups);
@@ -672,7 +757,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ setActiveTab, onEditDispat
                 {stats.recentDispatches.map((d) => (
                   <tr key={d.id} className="hover:bg-slate-50/50 transition-colors duration-100">
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-mono font-bold text-slate-800">
-                      {d.dc_no}
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span>{d.dc_no}</span>
+                        {Boolean(d.is_empty_pallets) && (
+                          <span className="px-1.5 py-0.5 rounded text-[10px] font-black uppercase tracking-wider bg-amber-100 text-amber-800 border border-amber-300">
+                            Empty
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-600 font-medium">
                       {formatDateTimeDisplay(d.date)}
@@ -695,6 +787,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ setActiveTab, onEditDispat
                         const maxP = getVehicleMaxPallets(vSize);
                         const curP = d.total_pallets || 1;
                         const utilPct = Math.round((curP / maxP) * 100);
+                        if (d.is_empty_pallets) {
+                          return (
+                            <div className="text-[10px] font-semibold text-slate-400 font-mono flex items-center gap-1.5 mt-0.5">
+                              <span className="bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-bold">{vSize}</span>
+                            </div>
+                          );
+                        }
                         return (
                           <div className="text-[10px] font-semibold text-slate-400 font-mono flex items-center gap-1.5 mt-0.5">
                             <span className="bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-bold">{vSize}</span>

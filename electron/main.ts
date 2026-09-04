@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain } from 'electron';
+import { app, BrowserWindow, ipcMain, clipboard } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
 import { loadSettings, saveSettings } from './ipc/settings';
@@ -16,7 +16,17 @@ import {
   getDb,
   getPipelineStats
 } from './ipc/database';
-import { backupDatabase, uploadBackupToCloud, checkAndRunPeriodicBackup } from './ipc/backup';
+import {
+  backupDatabase,
+  uploadBackupToCloud,
+  uploadLiveStateBackup,
+  restoreFromCloudLatest,
+  checkAndRunPeriodicBackup,
+  shouldRun3DayBackup,
+  shouldRunHourlyBackup,
+  restoreDatabase,
+  getBackupList
+} from './ipc/backup';
 import { printChallan, printBarcodes, printCombinedDispatch } from './ipc/printer';
 import { checkForUpdates, downloadUpdate, installUpdate, getUpdateInfo, initUpdater } from './updater';
 
@@ -47,38 +57,36 @@ function createWindow() {
     mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
   }
 
-  // Trigger auto local and cloud backup on close
+  // Trigger auto backup on close if 3-day archive or hourly backup is due
   let isBackingUpAndQuitting = false;
   mainWindow.on('close', (e) => {
-    if (isBackingUpAndQuitting) return;
+    if (shouldRun3DayBackup() || shouldRunHourlyBackup()) {
+      if (isBackingUpAndQuitting) return;
 
-    // Prevent default exit
-    e.preventDefault();
-    isBackingUpAndQuitting = true;
+      // Prevent default exit to complete the pending backup
+      e.preventDefault();
+      isBackingUpAndQuitting = true;
 
-    console.log('App closing: Triggering automatic local and cloud S3 backup...');
+      console.log('App closing: Backup is due. Running auto backup before exit...');
 
-    // Hide window immediately for responsive closure UX
-    if (mainWindow) {
-      mainWindow.hide();
-    }
-
-    // Run async backup & cloud upload
-    (async () => {
-      try {
-        const localRes = backupDatabase();
-        console.log('Auto local backup on exit result:', localRes.message);
-
-        const cloudRes = await uploadBackupToCloud();
-        console.log('Auto cloud backup on exit result:', cloudRes.message);
-      } catch (err) {
-        console.error('Auto backup on close failed:', err);
-      } finally {
-        if (mainWindow) {
-          mainWindow.destroy();
-        }
+      if (mainWindow) {
+        mainWindow.hide();
       }
-    })();
+
+      (async () => {
+        try {
+          await checkAndRunPeriodicBackup();
+        } catch (err) {
+          console.error('Auto backup on close failed:', err);
+        } finally {
+          if (mainWindow) {
+            mainWindow.destroy();
+          }
+        }
+      })();
+    } else {
+      console.log('App closing: Backups are up to date, exiting immediately without creating backup.');
+    }
   });
 
   mainWindow.on('closed', () => {
@@ -166,11 +174,11 @@ app.whenReady().then(() => {
     console.error('Failed to initialize database or run seed on startup:', err);
   }
 
-  // Initiate periodic 3-day backup check (for software running continuously)
+  // Initiate periodic backup check (every 15 minutes to reliably catch hourly & 3-day windows)
   checkAndRunPeriodicBackup();
   setInterval(() => {
     checkAndRunPeriodicBackup();
-  }, 4 * 60 * 60 * 1000);
+  }, 15 * 60 * 1000);
 
   // Register IPC handlers
   ipcMain.handle('settings:load', () => {
@@ -229,12 +237,28 @@ app.whenReady().then(() => {
     return uploadBackupToCloud();
   });
 
+  ipcMain.handle('backup:uploadLiveStateCloud', () => {
+    return uploadLiveStateBackup();
+  });
+
+  ipcMain.handle('backup:restore', (_, filePath) => {
+    return restoreDatabase(filePath);
+  });
+
+  ipcMain.handle('backup:restoreCloudLatest', () => {
+    return restoreFromCloudLatest();
+  });
+
+  ipcMain.handle('backup:list', () => {
+    return getBackupList();
+  });
+
   ipcMain.handle('print:challan', (_, dispatch, items) => {
     return printChallan(dispatch, items);
   });
 
-  ipcMain.handle('print:barcodes', (_, items) => {
-    return printBarcodes(items);
+  ipcMain.handle('print:barcodes', (_, items, dispatch) => {
+    return printBarcodes(items, dispatch);
   });
 
   ipcMain.handle('print:combined', (_, dispatch, items) => {
@@ -260,6 +284,11 @@ app.whenReady().then(() => {
 
   ipcMain.handle('db:getPipelineStats', () => {
     return getPipelineStats();
+  });
+
+  ipcMain.handle('clipboard:write', (_, { text, html }: { text: string; html?: string }) => {
+    clipboard.write({ text, html });
+    return true;
   });
 
   createWindow();
